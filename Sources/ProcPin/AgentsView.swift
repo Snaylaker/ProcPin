@@ -12,12 +12,16 @@ struct AgentsView: View {
                 empty
             } else {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 12) {
-                        ForEach(state.agents) { agent in
-                            AgentCard(state: state, agent: agent)
+                    VStack(spacing: 0) {
+                        ForEach(Array(state.agents.enumerated()), id: \.element.id) { idx, agent in
+                            if idx > 0 {
+                                Rectangle().fill(Color.primary.opacity(0.07))
+                                    .frame(height: 1).padding(.horizontal, 18)
+                            }
+                            AgentSection(state: state, agent: agent)
                         }
                     }
-                    .padding(.vertical, 10)
+                    .padding(.vertical, 4)
                 }
                 .frame(maxHeight: 460)
             }
@@ -26,19 +30,17 @@ struct AgentsView: View {
     }
 
     private var empty: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 9) {
             Image(systemName: "sparkles")
-                .font(.system(size: 28))
+                .font(.system(size: 30))
                 .foregroundStyle(.tertiary)
             Text("No agents running")
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 14, weight: .semibold))
             Text("Start Claude Code, OpenCode, Codex, Aider, Gemini, Goose or pi and they'll appear here with their spawned processes.")
-                .font(.system(size: 11))
+                .font(.system(size: 11.5))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-            Button {
-                state.scanAgents()
-            } label: {
+            Button { state.scanAgents() } label: {
                 Label("Rescan", systemImage: "arrow.clockwise").font(.system(size: 11, weight: .semibold))
             }
             .buttonStyle(.bordered)
@@ -46,87 +48,75 @@ struct AgentsView: View {
             .padding(.top, 2)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 40)
-        .padding(.horizontal, 24)
+        .padding(.vertical, 44)
+        .padding(.horizontal, 28)
     }
 }
 
-private struct AgentCard: View {
+private struct AgentSection: View {
     @ObservedObject var state: AppState
     let agent: Agents.Agent
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            cardHeader
+        VStack(alignment: .leading, spacing: 10) {
+            titleRow
             if let task = agent.currentTask, !task.isEmpty {
                 taskBanner(task)
             }
-            VStack(spacing: 3) {
+            // Total CPU bar + label row.
+            MeterBar(fraction: min(agent.totalCPU / 100.0, 1), tint: tint(agent.totalCPU), height: 6)
+            HStack {
+                Text("\(Format.cpu(agent.totalCPU)) CPU")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                Spacer()
+                Text("\(Format.memory(agent.totalMemory)) · \(agent.childCount) spawned")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+            }
+            // Process tree.
+            VStack(spacing: 2) {
                 ForEach(agent.nodes) { node in
                     AgentNodeRow(state: state, agent: agent, node: node)
                 }
             }
+            .padding(.top, 2)
         }
-        .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.primary.opacity(0.04))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
-                )
-        )
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
+    }
+
+    private var titleRow: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "sparkles").font(.system(size: 12)).foregroundStyle(.tint)
+            Text(agent.kind).font(.system(size: 15, weight: .bold))
+            if let cwd = agent.cwd {
+                Text((cwd as NSString).lastPathComponent)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.tint)
+            }
+            Spacer()
+            Text("up \(Format.uptime(Date().timeIntervalSince(agent.root.startDate)))")
+                .font(.system(size: 11)).foregroundStyle(.secondary)
+        }
     }
 
     private func taskBanner(_ task: String) -> some View {
-        HStack(alignment: .top, spacing: 6) {
-            Image(systemName: "quote.opening")
-                .font(.system(size: 9))
-                .foregroundStyle(.tint)
-                .padding(.top, 2)
+        HStack(alignment: .top, spacing: 7) {
+            Image(systemName: "quote.opening").font(.system(size: 10)).foregroundStyle(.tint).padding(.top, 2)
             Text(task)
-                .font(.system(size: 11))
+                .font(.system(size: 11.5))
                 .foregroundStyle(.primary)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 9)
-        .padding(.vertical, 7)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
         .background(Color.accentColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
     }
 
-    private var cardHeader: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 12))
-                .foregroundStyle(.tint)
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 6) {
-                    Text(agent.kind).font(.system(size: 13, weight: .bold))
-                    if let cwd = agent.cwd {
-                        Text((cwd as NSString).lastPathComponent)
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(.tint)
-                    }
-                }
-                Text("PID \(agent.root.pid) · \(agent.childCount) spawned · up \(Format.uptime(uptime(agent.root.startDate)))")
-                    .font(.system(size: 10, design: .rounded))
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            VStack(alignment: .trailing, spacing: 1) {
-                Text(Format.cpu(agent.totalCPU))
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
-                Text(Format.memory(agent.totalMemory))
-                    .font(.system(size: 10, design: .rounded))
-                    .foregroundStyle(.secondary)
-            }
-        }
+    private func tint(_ cpu: Double) -> Color {
+        switch cpu { case ..<40: return .green; case 40..<80: return .yellow; default: return .red }
     }
-
-    private func uptime(_ start: Date) -> TimeInterval { Date().timeIntervalSince(start) }
 }
 
 private struct AgentNodeRow: View {
@@ -139,45 +129,37 @@ private struct AgentNodeRow: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            // Tree indentation + branch glyph.
             if node.depth > 0 {
                 Spacer().frame(width: CGFloat(node.depth) * 14)
                 Image(systemName: "arrow.turn.down.right")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.tertiary)
+                    .font(.system(size: 9)).foregroundStyle(.tertiary)
             }
-
             VStack(alignment: .leading, spacing: 1) {
                 Text(node.proc.name)
-                    .font(.system(size: 12, weight: isRoot ? .semibold : .regular))
+                    .font(.system(size: 12.5, weight: isRoot ? .semibold : .regular))
                     .lineLimit(1)
                 Text(node.proc.command)
-                    .font(.system(size: 9))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
             }
-
             Spacer(minLength: 6)
-
             Text("\(Format.cpu(node.proc.cpuPercent)) · \(Format.memory(node.proc.memoryBytes))")
-                .font(.system(size: 9, design: .rounded))
+                .font(.system(size: 10, design: .rounded))
                 .foregroundStyle(.tertiary)
                 .layoutPriority(1)
-
             actions
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(hovering ? Color.primary.opacity(0.06) : Color.white.opacity(0.001))
+                .fill(hovering ? Color.primary.opacity(0.06) : .clear)
         )
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
     }
 
     private var actions: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 1) {
             IconButton(systemName: "pin", help: "Pin into a project", tint: .accentColor) {
                 state.pinPID(node.proc.pid, name: node.proc.name,
                              project: agent.kind, role: isRoot ? "agent" : node.proc.name)
@@ -189,11 +171,13 @@ private struct AgentNodeRow: View {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 12, weight: .semibold))
                     .frame(width: 22, height: 20)
+                    .contentShape(Rectangle())
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
-            .frame(width: 26)
+            .frame(width: 24)
         }
-        .opacity(hovering ? 1 : 0.5)
+        .opacity(hovering ? 1 : 0.0)
+        .animation(.easeInOut(duration: 0.12), value: hovering)
     }
 }

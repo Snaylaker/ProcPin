@@ -25,8 +25,8 @@ struct RootView: View {
                 .transition(.opacity)
             }
         }
-        .frame(width: 380)
-        .frame(minHeight: 200)
+        .frame(width: 384)
+        .frame(minHeight: 220)
         .background(.regularMaterial)
     }
 }
@@ -41,20 +41,20 @@ struct ProcessListView: View {
     enum ViewMode: String, CaseIterable { case pinned = "Pinned", agents = "Agents" }
     @State private var viewMode: ViewMode = .pinned
 
+    private let hPad: CGFloat = 18
+
     var body: some View {
         VStack(spacing: 0) {
             header
-            Divider()
             modePicker
-            Divider().opacity(0.5)
             if viewMode == .pinned {
                 searchBar
-                Divider().opacity(0.5)
+                hairline
                 content
             } else {
                 AgentsView(state: state, screen: $screen)
             }
-            Divider()
+            hairline
             footer
         }
         .onChange(of: viewMode) { mode in
@@ -63,29 +63,22 @@ struct ProcessListView: View {
         .onDisappear { state.setAgentScanning(false) }
     }
 
-    private var modePicker: some View {
-        Picker("", selection: $viewMode) {
-            ForEach(ViewMode.allCases, id: \.self) { mode in
-                Text(mode == .agents ? "Agents\(state.agents.isEmpty ? "" : " (\(state.agents.count))")" : mode.rawValue)
-                    .tag(mode)
-            }
-        }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+    private var hairline: some View {
+        Rectangle().fill(Color.primary.opacity(0.07)).frame(height: 1)
     }
 
+    // MARK: Header
+
     private var header: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             Image(systemName: "pin.circle.fill")
                 .foregroundStyle(.tint)
-                .font(.system(size: 17))
+                .font(.system(size: 19))
             VStack(alignment: .leading, spacing: 1) {
                 Text("ProcPin")
-                    .font(.system(size: 14, weight: .bold))
+                    .font(.system(size: 16, weight: .bold))
                 Text(summaryText)
-                    .font(.system(size: 10, design: .rounded))
+                    .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
             Spacer()
@@ -98,23 +91,37 @@ struct ProcessListView: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.horizontal, hPad)
+        .padding(.top, 14)
+        .padding(.bottom, 10)
     }
 
     private var summaryText: String {
         let running = state.pins.filter { state.statuses[$0.id]?.isRunning ?? false }.count
         let totalCPU = state.pins.reduce(0.0) { $0 + (state.statuses[$1.id]?.cpuPercent ?? 0) }
         if state.pins.isEmpty { return "no processes pinned" }
-        return "\(running)/\(state.pins.count) running · \(Format.cpu(totalCPU)) CPU"
+        return "\(running) of \(state.pins.count) running · \(Format.cpu(totalCPU)) CPU"
+    }
+
+    private var modePicker: some View {
+        Picker("", selection: $viewMode) {
+            ForEach(ViewMode.allCases, id: \.self) { mode in
+                Text(mode == .agents ? "Agents\(state.agents.isEmpty ? "" : " \(state.agents.count)")" : mode.rawValue)
+                    .tag(mode)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .padding(.horizontal, hPad)
+        .padding(.bottom, 12)
     }
 
     private var searchBar: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 7) {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(.secondary)
                 .font(.system(size: 12))
-            TextField("Search by project, role, name…", text: $search)
+            TextField("Search project, role, name…", text: $search)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12))
             if !search.isEmpty {
@@ -124,54 +131,56 @@ struct ProcessListView: View {
                 .buttonStyle(.plain)
             }
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 11)
         .padding(.vertical, 8)
+        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .padding(.horizontal, hPad)
+        .padding(.bottom, 12)
     }
+
+    // MARK: Content
 
     @ViewBuilder
     private var content: some View {
         let groups = state.groupedPins(filter: search)
         if state.pins.isEmpty {
-            emptyState(
-                icon: "tray",
-                title: "No pinned processes",
-                subtitle: "Click Add to pin a running process or run a command."
-            )
+            emptyState(icon: "tray", title: "No pinned processes",
+                       subtitle: "Click Add to pin a running process, run a command, or import a tmux session.")
         } else if groups.isEmpty {
-            emptyState(
-                icon: "magnifyingglass",
-                title: "No matches",
-                subtitle: "Nothing matches “\(search)”."
-            )
+            emptyState(icon: "magnifyingglass", title: "No matches",
+                       subtitle: "Nothing matches “\(search)”.")
         } else {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
-                    ForEach(groups, id: \.project) { group in
+                VStack(spacing: 0) {
+                    ForEach(Array(groups.enumerated()), id: \.element.project) { idx, group in
+                        if idx > 0 { hairline.padding(.horizontal, hPad) }
                         ProjectSection(state: state, screen: $screen,
                                        project: group.project, pins: group.pins)
                     }
                 }
-                .padding(.vertical, 10)
+                .padding(.vertical, 4)
             }
-            .frame(maxHeight: 420)
+            .frame(maxHeight: 440)
         }
     }
 
     private func emptyState(icon: String, title: String, subtitle: String) -> some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 9) {
             Image(systemName: icon)
-                .font(.system(size: 28))
+                .font(.system(size: 30))
                 .foregroundStyle(.tertiary)
-            Text(title).font(.system(size: 13, weight: .semibold))
+            Text(title).font(.system(size: 14, weight: .semibold))
             Text(subtitle)
-                .font(.system(size: 11))
+                .font(.system(size: 11.5))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 36)
-        .padding(.horizontal, 24)
+        .padding(.vertical, 44)
+        .padding(.horizontal, 28)
     }
+
+    // MARK: Footer
 
     private var footer: some View {
         HStack {
@@ -179,21 +188,18 @@ struct ProcessListView: View {
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
             Spacer()
-            Button {
-                NSApp.terminate(nil)
-            } label: {
-                Label("Quit", systemImage: "power")
-                    .font(.system(size: 11))
+            Button { NSApp.terminate(nil) } label: {
+                Label("Quit", systemImage: "power").font(.system(size: 11))
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, hPad)
+        .padding(.vertical, 9)
     }
 }
 
-// MARK: - Project section
+// MARK: - Project section (flat, CodexBar-style)
 
 struct ProjectSection: View {
     @ObservedObject var state: AppState
@@ -201,61 +207,49 @@ struct ProjectSection: View {
     let project: String
     let pins: [PinnedProcess]
 
+    private let hPad: CGFloat = 18
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionHeader
-            VStack(spacing: 5) {
+        let cap = state.capacity(forProject: project)
+        VStack(alignment: .leading, spacing: 9) {
+            // Title row.
+            HStack(spacing: 7) {
+                Text(project.isEmpty ? "Ungrouped" : project)
+                    .font(.system(size: 15, weight: .bold))
+                Spacer()
+                Text("\(cap.running)/\(cap.total) up")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                projectMenu
+            }
+
+            // Full-width usage bar + label row.
+            if cap.total > 0 {
+                MeterBar(fraction: cap.running == 0 ? 0 : min(cap.cpu / 100.0, 1),
+                         tint: tint(forCPU: cap.cpu), height: 6)
+                HStack {
+                    Text(cap.running == 0 ? "idle" : "\(Format.cpu(cap.cpu)) CPU")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    if cap.running > 0 {
+                        Text(Format.memory(cap.memory))
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            // Rows.
+            VStack(spacing: 2) {
                 ForEach(pins) { pin in
                     ProcessRow(state: state, screen: $screen, pin: pin)
                 }
             }
+            .padding(.top, 2)
         }
-        .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.primary.opacity(0.04))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
-                )
-        )
-        .padding(.horizontal, 10)
-    }
-
-    private var sectionHeader: some View {
-        let cap = state.capacity(forProject: project)
-        let allRunning = cap.total > 0 && cap.running == cap.total
-        return VStack(spacing: 6) {
-            HStack(spacing: 8) {
-                Image(systemName: project.isEmpty ? "square.dashed" : "folder.fill")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tint)
-                Text(project.isEmpty ? "Ungrouped" : project)
-                    .font(.system(size: 13, weight: .bold))
-                Spacer()
-                HStack(spacing: 4) {
-                    Circle()
-                        .fill(allRunning ? Color.green : (cap.running == 0 ? Color.secondary.opacity(0.5) : Color.yellow))
-                        .frame(width: 6, height: 6)
-                    Text("\(cap.running)/\(cap.total) up")
-                        .font(.system(size: 10, weight: .medium, design: .rounded))
-                        .foregroundStyle(.secondary)
-                }
-                projectMenu
-            }
-            if cap.running > 0 {
-                HStack(spacing: 8) {
-                    MeterBar(fraction: min(cap.cpu / 100.0, 1), tint: tint(forCPU: cap.cpu))
-                    Text("\(Format.cpu(cap.cpu)) CPU")
-                        .font(.system(size: 10, weight: .medium, design: .rounded))
-                        .foregroundStyle(.secondary)
-                    Text("·").foregroundStyle(.tertiary)
-                    Text(Format.memory(cap.memory))
-                        .font(.system(size: 10, design: .rounded))
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
+        .padding(.horizontal, hPad)
+        .padding(.vertical, 14)
     }
 
     private func tint(forCPU cpu: Double) -> Color {
@@ -266,7 +260,6 @@ struct ProjectSection: View {
         }
     }
 
-    /// Per-project teardown actions.
     private var projectMenu: some View {
         Menu {
             if state.projectHasTmuxPanes(project) {
@@ -281,9 +274,11 @@ struct ProjectSection: View {
                 state.unpinProject(project)
             }
         } label: {
-            Image(systemName: "ellipsis.circle")
-                .font(.system(size: 12))
+            Image(systemName: "ellipsis")
+                .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.secondary)
+                .frame(width: 22, height: 20)
+                .contentShape(Rectangle())
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
@@ -291,7 +286,7 @@ struct ProjectSection: View {
     }
 }
 
-// MARK: - Process row
+// MARK: - Process row (flat)
 
 struct ProcessRow: View {
     @ObservedObject var state: AppState
@@ -303,48 +298,45 @@ struct ProcessRow: View {
     private var running: Bool { status?.isRunning ?? false }
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             StatusDot(running: running)
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(pin.name)
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(size: 13, weight: .semibold))
                         .lineLimit(1)
-                    if !pin.role.isEmpty {
-                        Badge(text: pin.role)
-                    }
+                    if !pin.role.isEmpty { Badge(text: pin.role) }
                 }
-                Text(running ? "up \(Format.uptime(status?.uptimeSeconds ?? 0)) · PID \(pin.pid)" : "not running")
-                    .font(.system(size: 10))
+                Text(subtitle)
+                    .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
 
             Spacer(minLength: 6)
-
-            if running, let s = status {
-                CapacityBar(cpuPercent: s.cpuPercent ?? 0, memoryBytes: s.memoryBytes)
-            }
-
             actions
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, 7)
+        .padding(.vertical, 6)
         .background(
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(hovering ? Color.primary.opacity(0.07) : Color.white.opacity(0.001))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(hovering ? 0.06 : 0), lineWidth: 1)
-                )
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(hovering ? Color.primary.opacity(0.06) : .clear)
         )
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
     }
 
+    private var subtitle: String {
+        guard running, let s = status else { return "not running · PID \(pin.pid)" }
+        var parts = ["up \(Format.uptime(s.uptimeSeconds ?? 0))"]
+        if let c = s.cpuPercent { parts.append("\(Format.cpu(c)) CPU") }
+        if let m = s.memoryBytes { parts.append(Format.memory(m)) }
+        return parts.joined(separator: " · ")
+    }
+
     private var actions: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 1) {
             IconButton(systemName: "arrow.clockwise", help: "Restart", tint: .blue) {
                 state.restart(pin.id)
             }
@@ -369,18 +361,17 @@ struct ProcessRow: View {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 12, weight: .semibold))
                     .frame(width: 24, height: 22)
+                    .contentShape(Rectangle())
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
-            .frame(width: 28)
+            .frame(width: 26)
         }
-        .opacity(hovering ? 1 : 0.55)
+        .opacity(hovering ? 1 : 0.0)
+        .animation(.easeInOut(duration: 0.12), value: hovering)
     }
 
-    /// Label reflects whether removing will also close a tmux pane.
     private var removeLabel: String {
-        (pin.tmuxPaneId?.isEmpty == false)
-            ? "Kill & Close tmux Pane"
-            : "Kill & Remove"
+        (pin.tmuxPaneId?.isEmpty == false) ? "Kill & Close tmux Pane" : "Kill & Remove"
     }
 }
