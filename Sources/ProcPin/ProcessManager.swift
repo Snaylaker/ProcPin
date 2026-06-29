@@ -8,43 +8,12 @@ import Darwin
 /// uses the native `kill(2)` syscall.
 enum ProcessManager {
 
-    // MARK: - Live process listing
-
-    /// A snapshot of a currently running process, used by the "pin" picker.
-    struct LiveProcess {
-        let pid: Int32
-        let startDate: Date
-        let command: String
-        let cpuPercent: Double
-        let memoryBytes: UInt64
-        /// Short name derived from the command (basename of argv[0]).
-        var name: String {
-            let exe = command.split(separator: " ").first.map(String.init) ?? command
-            return (exe as NSString).lastPathComponent
-        }
-    }
-
     private static let lstartFormatter: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "EEE MMM d HH:mm:ss yyyy"
         return f
     }()
-
-    /// Returns all running processes owned by the user, newest first.
-    static func listProcesses() -> [LiveProcess] {
-        // pid, %cpu, rss(KB), lstart (5 tokens), then full command.
-        guard let out = runCapturing("/bin/ps", ["-axo", "pid=,%cpu=,rss=,lstart=,command="]) else {
-            return []
-        }
-        var result: [LiveProcess] = []
-        for line in out.split(separator: "\n") {
-            guard let proc = parsePSLine(String(line)) else { continue }
-            result.append(proc)
-        }
-        // Newest started first feels most useful when pinning.
-        return result.sorted { $0.startDate > $1.startDate }
-    }
 
     /// A process row including its parent pid, for building process trees.
     struct ProcRow {
@@ -86,27 +55,6 @@ enum ProcessManager {
                                   cpuPercent: cpu, memoryBytes: rssKB * 1024, stat: stat))
         }
         return result
-    }
-
-    /// Parses a line of `ps -axo pid=,%cpu=,rss=,lstart=,command=`.
-    /// Example: "1234 12.3 123456 Mon Jun 29 16:17:00 2026 /usr/bin/node server.js"
-    private static func parsePSLine(_ line: String) -> LiveProcess? {
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        let parts = trimmed.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
-        // Need: pid + cpu + rss + 5 lstart tokens + at least 1 command token.
-        guard parts.count >= 9, let pid = Int32(parts[0]) else { return nil }
-        let cpu = Double(parts[1]) ?? 0
-        let rssKB = UInt64(parts[2]) ?? 0
-        let lstart = parts[3...7].joined(separator: " ")
-        guard let startDate = lstartFormatter.date(from: lstart) else { return nil }
-        let command = parts[8...].joined(separator: " ")
-        return LiveProcess(
-            pid: pid,
-            startDate: startDate,
-            command: command,
-            cpuPercent: cpu,
-            memoryBytes: rssKB * 1024
-        )
     }
 
     // MARK: - Status of a pinned process

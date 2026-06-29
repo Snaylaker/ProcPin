@@ -126,8 +126,8 @@ struct ProcessListView: View {
     private var content: some View {
         let groups = state.groupedPins(filter: "")
         if state.pins.isEmpty {
-            emptyState(icon: "tray", title: "No pinned processes",
-                       subtitle: "Click Add to pin a running process, run a command, or import a tmux session.")
+            emptyState(icon: "rectangle.split.3x1", title: "No tmux processes yet",
+                       subtitle: "Click Add to detect your tmux sessions and track their panes.")
         } else {
             ScrollView {
                 VStack(spacing: 0) {

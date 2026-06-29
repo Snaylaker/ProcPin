@@ -160,10 +160,6 @@ private struct AgentNodeRow: View {
 
     private var actions: some View {
         HStack(spacing: 1) {
-            IconButton(systemName: "pin", help: "Pin into a project", tint: .accentColor) {
-                state.pinPID(node.proc.pid, name: node.proc.name,
-                             project: agent.kind, role: isRoot ? "agent" : node.proc.name)
-            }
             Menu {
                 Button("Kill (SIGTERM)") { state.killPID(node.proc.pid, force: false) }
                 Button("Force Kill (SIGKILL)") { state.killPID(node.proc.pid, force: true) }

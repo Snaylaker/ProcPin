@@ -10,8 +10,6 @@ final class AppState: ObservableObject {
     @Published private(set) var pins: [PinnedProcess] = []
     /// Latest computed status keyed by pin id.
     @Published private(set) var statuses: [UUID: ProcessStatus] = [:]
-    /// Live processes available to pin (refreshed when the picker opens).
-    @Published private(set) var liveProcesses: [ProcessManager.LiveProcess] = []
     /// Detected AI agents and their process trees (only scanned when enabled).
     @Published private(set) var agents: [Agents.Agent] = []
 
@@ -215,55 +213,12 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// Refresh the list of live processes for the picker.
-    func refreshLiveProcesses() {
-        work.async {
-            let list = ProcessManager.listProcesses()
-            Task { @MainActor in self.liveProcesses = list }
-        }
-    }
-
     // MARK: - Mutations
 
     func addPin(_ pin: PinnedProcess) {
         pins.append(pin)
         persist()
         refresh()
-    }
-
-    func pinLive(_ proc: ProcessManager.LiveProcess, project: String, role: String) {
-        let pin = PinnedProcess(
-            pid: proc.pid,
-            name: proc.name,
-            command: proc.command,
-            workingDirectory: nil,
-            observedStartEpoch: proc.startDate.timeIntervalSince1970,
-            project: project,
-            role: role
-        )
-        addPin(pin)
-    }
-
-    /// Launches a command, then pins it under the given project/role.
-    @discardableResult
-    func pinCommand(_ command: String, project: String, role: String) -> Bool {
-        guard let pid = ProcessManager.launch(command: command, workingDirectory: nil) else {
-            return false
-        }
-        usleep(200_000)
-        let start = ProcessManager.startDate(forPID: pid)?.timeIntervalSince1970
-        let exe = command.split(separator: " ").first.map(String.init) ?? command
-        let pin = PinnedProcess(
-            pid: pid,
-            name: (exe as NSString).lastPathComponent,
-            command: command,
-            workingDirectory: nil,
-            observedStartEpoch: start,
-            project: project,
-            role: role
-        )
-        addPin(pin)
-        return true
     }
 
     func unpin(_ id: UUID) {
@@ -483,6 +438,7 @@ final class AppState: ObservableObject {
         )
         addPin(pin)
     }
+
 
     private func persist() {
         Store.shared.save(pins)
