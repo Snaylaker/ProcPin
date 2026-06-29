@@ -322,11 +322,24 @@ struct ProcessRow: View {
     @Binding var screen: RootView.Screen
     let pin: PinnedProcess
     @State private var hovering = false
+    @State private var showPeek = false
+
+    @AppStorage("ProcPin.cpuAlert") private var cpuAlert: Double = 100
+    @AppStorage("ProcPin.memAlertMB") private var memAlertMB: Double = 1500
 
     private var status: ProcessStatus? { state.statuses[pin.id] }
     private var running: Bool { status?.isRunning ?? false }
     private var paused: Bool { status?.isPaused ?? false }
     private var ports: [Int] { Array((status?.ports ?? []).prefix(3)) }
+    private var isTmux: Bool { pin.tmuxPaneId?.isEmpty == false }
+
+    /// True when the process exceeds the configured CPU or memory thresholds.
+    private var isHot: Bool {
+        guard running, let s = status, !s.isPaused else { return false }
+        let cpu = s.cpuPercent ?? 0
+        let memMB = Double(s.memoryBytes ?? 0) / 1_048_576
+        return (cpuAlert > 0 && cpu >= cpuAlert) || (memAlertMB > 0 && memMB >= memAlertMB)
+    }
 
     /// A clickable port chip that opens the local URL in the browser.
     private func portChip(_ port: Int) -> some View {
@@ -357,38 +370,53 @@ struct ProcessRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 10) {
-            Circle()
-                .fill(paused ? Color.yellow : (running ? Color.green : Color.secondary.opacity(0.5)))
-                .frame(width: 8, height: 8)
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Circle()
+                    .fill(paused ? Color.yellow : (running ? Color.green : Color.secondary.opacity(0.5)))
+                    .frame(width: 8, height: 8)
 
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(pin.name)
-                        .font(.system(size: 13, weight: .semibold))
-                        .lineLimit(1)
-                    if !pin.role.isEmpty { Badge(text: pin.role) }
-                    ForEach(ports, id: \.self) { port in
-                        portChip(port)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(pin.name)
+                            .font(.system(size: 13, weight: .semibold))
+                            .lineLimit(1)
+                        if isHot {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.orange)
+                                .help("High usage (over your CPU/memory threshold)")
+                        }
+                        if !pin.role.isEmpty { Badge(text: pin.role) }
+                        ForEach(ports, id: \.self) { port in
+                            portChip(port)
+                        }
                     }
+                    Text(subtitle)
+                        .font(.system(size: 11))
+                        .foregroundStyle(isHot ? .orange : .secondary)
+                        .lineLimit(1)
                 }
-                Text(subtitle)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
 
-            Spacer(minLength: 6)
-            actions
+                Spacer(minLength: 6)
+                actions
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(hovering ? Color.primary.opacity(0.06) : .clear)
+            )
+            .contentShape(Rectangle())
+            .onHover { hovering = $0 }
+
+            if showPeek, let paneId = pin.tmuxPaneId, !paneId.isEmpty {
+                PanePeekView(paneId: paneId)
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 6)
+                    .transition(.opacity)
+            }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(hovering ? Color.primary.opacity(0.06) : .clear)
-        )
-        .contentShape(Rectangle())
-        .onHover { hovering = $0 }
     }
 
     private var subtitle: String {
@@ -402,10 +430,15 @@ struct ProcessRow: View {
 
     private var actions: some View {
         HStack(spacing: 1) {
-            // Jump is always visible for tmux-pinned rows (key action).
-            if pin.tmuxPaneId?.isEmpty == false {
+            // Jump + Peek are always visible for tmux-pinned rows (key actions).
+            if isTmux {
                 IconButton(systemName: "arrow.up.right.square", help: "Jump to tmux pane", tint: .purple) {
                     state.jumpToPane(pin.id)
+                }
+                IconButton(systemName: showPeek ? "text.alignleft" : "text.alignleft",
+                           help: showPeek ? "Hide output" : "Peek output",
+                           tint: showPeek ? .accentColor : .secondary) {
+                    withAnimation(.easeInOut(duration: 0.15)) { showPeek.toggle() }
                 }
             }
             // Remaining actions fade up on hover but stay faintly visible.

@@ -7,6 +7,8 @@ struct SettingsView: View {
 
     @AppStorage(Terminals.settingsKey) private var terminalID: String = "auto"
     @AppStorage("ProcPin.showDock") private var showDock: Bool = false
+    @AppStorage("ProcPin.cpuAlert") private var cpuAlert: Double = 100
+    @AppStorage("ProcPin.memAlertMB") private var memAlertMB: Double = 1500
 
     var body: some View {
         VStack(spacing: 0) {
@@ -25,6 +27,7 @@ struct SettingsView: View {
                         .toggleStyle(.switch)
                         .onChange(of: showDock) { AppDelegate.setDockVisible($0) }
                     }
+                    alertsSection
                     section(title: "Terminal", subtitle: "Used when jumping to a tmux pane. Auto-detect figures out the hosting terminal from the pane's tty; pick a specific app if that doesn't work.") {
                         VStack(spacing: 2) {
                             ForEach(Terminals.all) { term in
@@ -35,7 +38,34 @@ struct SettingsView: View {
                 }
                 .padding(14)
             }
-            .frame(maxHeight: 460)
+            .frame(maxHeight: 600)
+        }
+    }
+
+    // MARK: Alerts
+
+    private var alertsSection: some View {
+        section(title: "Alerts", subtitle: "Flag a process with a warning when it exceeds these. Set 0 to disable.") {
+            VStack(spacing: 8) {
+                HStack {
+                    Text("CPU over").font(.system(size: 12.5))
+                    Spacer()
+                    TextField("", value: $cpuAlert, format: .number)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 64)
+                        .multilineTextAlignment(.trailing)
+                    Text("%").font(.system(size: 12)).foregroundStyle(.secondary)
+                }
+                HStack {
+                    Text("Memory over").font(.system(size: 12.5))
+                    Spacer()
+                    TextField("", value: $memAlertMB, format: .number)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 64)
+                        .multilineTextAlignment(.trailing)
+                    Text("MB").font(.system(size: 12)).foregroundStyle(.secondary)
+                }
+            }
         }
     }
 

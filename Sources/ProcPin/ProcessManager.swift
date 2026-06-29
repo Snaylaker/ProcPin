@@ -265,6 +265,33 @@ enum ProcessManager {
     @discardableResult
     static func resume(pid: Int32) -> Bool { Darwin.kill(pid, SIGCONT) == 0 }
 
+    /// Returns a pid and all of its descendant pids (deepest last not guaranteed).
+    static func subtreePIDs(_ root: Int32) -> [Int32] {
+        let rows = listAllDetailed()
+        var childrenByPPID: [Int32: [Int32]] = [:]
+        for r in rows { childrenByPPID[r.ppid, default: []].append(r.pid) }
+        var out: [Int32] = []
+        var seen = Set<Int32>()
+        var stack = [root]
+        while let p = stack.popLast() {
+            guard seen.insert(p).inserted else { continue }
+            out.append(p)
+            if let kids = childrenByPPID[p] { stack.append(contentsOf: kids) }
+        }
+        return out
+    }
+
+    /// Suspends/resumes a process and all of its descendants. Pausing only the
+    /// parent leaves child workers (e.g. a dev server's node children) running,
+    /// so we signal the whole tree.
+    static func suspendTree(_ root: Int32) {
+        // Stop children first, then the parent, to avoid the parent respawning.
+        for pid in subtreePIDs(root).reversed() { _ = Darwin.kill(pid, SIGSTOP) }
+    }
+    static func resumeTree(_ root: Int32) {
+        for pid in subtreePIDs(root) { _ = Darwin.kill(pid, SIGCONT) }
+    }
+
     /// Kills the current process (if any) and relaunches it from its command
     /// line. Returns the new pid on success.
     @discardableResult

@@ -195,6 +195,31 @@ enum Tmux {
         foregroundPID(tty: tty, fallback: fallback)
     }
 
+    /// Captures recent output from a pane (the last `lines` rows of scrollback
+    /// plus the visible screen). Returns nil if tmux/pane is unavailable.
+    static func capturePane(_ paneId: String, lines: Int = 50) -> String? {
+        guard let tmux = tmuxPath(), !paneId.isEmpty else { return nil }
+        let r = runFull(tmux, ["capture-pane", "-p", "-t", paneId, "-S", "-\(lines)"])
+        return r.status == 0 ? r.stdout : nil
+    }
+
+    /// Restarts whatever runs in a pane: interrupts the current process (C-c),
+    /// then re-runs the previous command from shell history (Up, Enter).
+    @discardableResult
+    static func restartPane(_ paneId: String) -> Bool {
+        guard let tmux = tmuxPath(), !paneId.isEmpty else { return false }
+        _ = runFull(tmux, ["send-keys", "-t", paneId, "C-c"])
+        usleep(350_000)
+        return runFull(tmux, ["send-keys", "-t", paneId, "Up", "Enter"]).status == 0
+    }
+
+    /// Sends Ctrl-C to a pane (graceful interrupt of the foreground process).
+    @discardableResult
+    static func interruptPane(_ paneId: String) -> Bool {
+        guard let tmux = tmuxPath(), !paneId.isEmpty else { return false }
+        return runFull(tmux, ["send-keys", "-t", paneId, "C-c"]).status == 0
+    }
+
     /// Finds the foreground process on a tty (the one running in the pane),
     /// falling back to the pane's shell pid. Shells are skipped so we track the
     /// actual dev server / command when present.

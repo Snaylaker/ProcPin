@@ -1,7 +1,6 @@
 import SwiftUI
 
 // MARK: - Status dot
-
 struct StatusDot: View {
     let running: Bool
     var body: some View {

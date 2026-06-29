@@ -354,24 +354,28 @@ final class AppState: ObservableObject {
 
     func kill(_ id: UUID, force: Bool) {
         guard let pin = pins.first(where: { $0.id == id }) else { return }
-        ProcessManager.kill(pid: pin.pid, force: force)
-        // Reflect change quickly.
+        if let paneId = pin.tmuxPaneId, !paneId.isEmpty, !force {
+            // Graceful stop inside the pane (Ctrl-C) for tmux processes.
+            Tmux.interruptPane(paneId)
+        } else {
+            ProcessManager.kill(pid: pin.pid, force: force)
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.refresh() }
     }
 
-    /// Suspend (pause) or resume a single pinned process.
+    /// Suspend (pause) or resume a single pinned process (whole subtree).
     func setPaused(_ id: UUID, paused: Bool) {
         guard let pin = pins.first(where: { $0.id == id }) else { return }
-        if paused { ProcessManager.suspend(pid: pin.pid) }
-        else { ProcessManager.resume(pid: pin.pid) }
+        if paused { ProcessManager.suspendTree(pin.pid) }
+        else { ProcessManager.resumeTree(pin.pid) }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in self?.refresh() }
     }
 
-    /// Suspend (pause) or resume every process in a project.
+    /// Suspend (pause) or resume every process in a project (each subtree).
     func setProjectPaused(_ project: String, paused: Bool) {
         for pin in pins where pin.project == project {
-            if paused { ProcessManager.suspend(pid: pin.pid) }
-            else { ProcessManager.resume(pid: pin.pid) }
+            if paused { ProcessManager.suspendTree(pin.pid) }
+            else { ProcessManager.resumeTree(pin.pid) }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in self?.refresh() }
     }
@@ -389,7 +393,15 @@ final class AppState: ObservableObject {
 
     func restart(_ id: UUID) {
         guard let idx = pins.firstIndex(where: { $0.id == id }) else { return }
-        if let newPID = ProcessManager.restart(pins[idx]) {
+        let pin = pins[idx]
+        if let paneId = pin.tmuxPaneId, !paneId.isEmpty {
+            // Restart inside the tmux pane (Ctrl-C + re-run last command).
+            Tmux.restartPane(paneId)
+            // Live-sync will pick up the new pid on the next refresh.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in self?.refresh() }
+            return
+        }
+        if let newPID = ProcessManager.restart(pin) {
             pins[idx].pid = newPID
             usleep(200_000)
             pins[idx].observedStartEpoch = ProcessManager.startDate(forPID: newPID)?.timeIntervalSince1970
