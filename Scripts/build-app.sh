@@ -23,6 +23,16 @@ mkdir -p "$MACOS_DIR" "$RES_DIR"
 
 cp ".build/release/$APP_NAME" "$MACOS_DIR/$APP_NAME"
 
+# App icon (generate if missing).
+if [ ! -f "Icon.icns" ] && command -v swift >/dev/null; then
+    echo "==> Generating app icon"
+    swift Scripts/make-icon.swift >/dev/null 2>&1 || true
+    iconutil -c icns build/AppIcon.iconset -o Icon.icns 2>/dev/null || true
+fi
+if [ -f "Icon.icns" ]; then
+    cp "Icon.icns" "$RES_DIR/AppIcon.icns"
+fi
+
 cat > "$APP_DIR/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -40,6 +50,8 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
     <string>1.0</string>
     <key>CFBundleExecutable</key>
     <string>$APP_NAME</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>LSMinimumSystemVersion</key>

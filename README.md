@@ -1,5 +1,7 @@
 # ProcPin
 
+<img src="docs/icon.png" width="120" align="right" alt="ProcPin icon" />
+
 A native macOS menu bar app to **pin processes**, group them by **project**, see **how long they've been running** plus their **CPU / memory capacity**, and **restart or kill** them in a couple of clicks.
 
 No Dock icon, no window — just a pin icon in the top bar with a rich SwiftUI dropdown.
