@@ -108,10 +108,79 @@ final class AppState: ObservableObject {
     func refresh() {
         let snapshot = pins
         work.async {
-            let newStatuses = ProcessManager.statuses(for: snapshot)
-            Task { @MainActor in self.statuses = newStatuses }
+            // Keep tmux-origin pins pointing at whatever currently runs in their
+            // pane (the foreground process / pid can change over time).
+            let updates = self.computeTmuxSync(snapshot)
+            var synced = snapshot
+            if !updates.isEmpty {
+                for i in synced.indices {
+                    if let u = updates[synced[i].id] {
+                        synced[i].pid = u.pid
+                        synced[i].observedStartEpoch = u.epoch
+                        synced[i].name = u.name
+                        synced[i].command = u.command
+                        synced[i].workingDirectory = u.cwd
+                    }
+                }
+            }
+            let newStatuses = ProcessManager.statuses(for: synced)
+            Task { @MainActor in
+                self.applyTmuxUpdates(updates)
+                self.statuses = newStatuses
+            }
         }
         if scanAgentsEnabled { scanAgents() }
+    }
+
+    private struct TmuxPinUpdate {
+        let pid: Int32
+        let epoch: Double?
+        let name: String
+        let command: String
+        let cwd: String?
+    }
+
+    /// For each tmux-origin pin, re-resolve its live pane (pid/command/cwd).
+    private func computeTmuxSync(_ snapshot: [PinnedProcess]) -> [UUID: TmuxPinUpdate] {
+        let tmuxPins = snapshot.filter { ($0.tmuxPaneId?.isEmpty == false) }
+        guard !tmuxPins.isEmpty else { return [:] }
+        let panes = Tmux.rawPanesByID()
+        guard !panes.isEmpty else { return [:] }
+
+        var updates: [UUID: TmuxPinUpdate] = [:]
+        for pin in tmuxPins {
+            guard let paneId = pin.tmuxPaneId, let pane = panes[paneId] else { continue }
+            let fg = Tmux.resolveForegroundPID(tty: pane.tty, fallback: pane.panePID)
+            let epoch = ProcessManager.startDate(forPID: fg)?.timeIntervalSince1970
+            let command = ProcessManager.commandLine(forPID: fg) ?? pane.currentCommand
+            updates[pin.id] = TmuxPinUpdate(
+                pid: fg,
+                epoch: epoch,
+                name: pane.currentCommand,
+                command: command,
+                cwd: pane.currentPath.isEmpty ? pin.workingDirectory : pane.currentPath
+            )
+        }
+        return updates
+    }
+
+    /// Applies tmux updates to the stored pins, persisting only on real change.
+    private func applyTmuxUpdates(_ updates: [UUID: TmuxPinUpdate]) {
+        guard !updates.isEmpty else { return }
+        var changed = false
+        for i in pins.indices {
+            guard let u = updates[pins[i].id] else { continue }
+            if pins[i].pid != u.pid || pins[i].name != u.name
+                || pins[i].command != u.command || pins[i].workingDirectory != u.cwd {
+                pins[i].pid = u.pid
+                pins[i].observedStartEpoch = u.epoch
+                pins[i].name = u.name
+                pins[i].command = u.command
+                pins[i].workingDirectory = u.cwd
+                changed = true
+            }
+        }
+        if changed { persist() }
     }
 
     /// Enable/disable agent tree scanning (driven by the Agents tab).

@@ -161,6 +161,40 @@ enum Tmux {
         return .success(panes)
     }
 
+    /// Lightweight pane snapshot (no foreground resolution), for live syncing.
+    struct RawPane {
+        let session: String
+        let windowName: String
+        let paneId: String
+        let panePID: Int32
+        let tty: String
+        let currentCommand: String
+        let currentPath: String
+    }
+
+    /// Lists all panes with one tmux call (no per-pane ps), keyed by pane id.
+    static func rawPanesByID() -> [String: RawPane] {
+        guard let tmux = tmuxPath() else { return [:] }
+        let fmt = ["#{session_name}", "#{window_name}", "#{pane_id}", "#{pane_pid}",
+                   "#{pane_tty}", "#{pane_current_command}", "#{pane_current_path}"]
+            .joined(separator: "\t")
+        let r = runFull(tmux, ["list-panes", "-a", "-F", fmt])
+        guard r.status == 0 else { return [:] }
+        var map: [String: RawPane] = [:]
+        for line in r.stdout.split(separator: "\n") {
+            let f = line.components(separatedBy: "\t")
+            guard f.count >= 7, let pid = Int32(f[3]) else { continue }
+            map[f[2]] = RawPane(session: f[0], windowName: f[1], paneId: f[2],
+                                panePID: pid, tty: f[4], currentCommand: f[5], currentPath: f[6])
+        }
+        return map
+    }
+
+    /// Resolves the foreground (tracked) pid for a pane tty.
+    static func resolveForegroundPID(tty: String, fallback: Int32) -> Int32 {
+        foregroundPID(tty: tty, fallback: fallback)
+    }
+
     /// Finds the foreground process on a tty (the one running in the pane),
     /// falling back to the pane's shell pid. Shells are skipped so we track the
     /// actual dev server / command when present.
