@@ -9,6 +9,7 @@ struct RootView: View {
     enum Screen: Equatable {
         case list
         case assign(editing: UUID?)
+        case settings
     }
     @State private var screen: Screen = .list
 
@@ -20,6 +21,11 @@ struct RootView: View {
                     .transition(.opacity)
             case .assign(let editing):
                 AssignView(state: state, editingPinID: editing) {
+                    withAnimation(.easeInOut(duration: 0.15)) { screen = .list }
+                }
+                .transition(.opacity)
+            case .settings:
+                SettingsView {
                     withAnimation(.easeInOut(duration: 0.15)) { screen = .list }
                 }
                 .transition(.opacity)
@@ -183,11 +189,19 @@ struct ProcessListView: View {
     // MARK: Footer
 
     private var footer: some View {
-        HStack {
+        HStack(spacing: 10) {
             Text("\(state.pins.count) pinned")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
             Spacer()
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) { screen = .settings }
+            } label: {
+                Image(systemName: "gearshape").font(.system(size: 12))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("Settings")
             Button { NSApp.terminate(nil) } label: {
                 Label("Quit", systemImage: "power").font(.system(size: 11))
             }
@@ -359,43 +373,47 @@ struct ProcessRow: View {
 
     private var actions: some View {
         HStack(spacing: 1) {
+            // Jump is always visible for tmux-pinned rows (key action).
             if pin.tmuxPaneId?.isEmpty == false {
                 IconButton(systemName: "arrow.up.right.square", help: "Jump to tmux pane", tint: .purple) {
                     state.jumpToPane(pin.id)
                 }
             }
-            IconButton(systemName: "arrow.clockwise", help: "Restart", tint: .blue) {
-                state.restart(pin.id)
-            }
-            IconButton(systemName: "stop.fill", help: "Kill (SIGTERM)", tint: .orange) {
-                state.kill(pin.id, force: false)
-            }
-            .disabled(!running)
-            .opacity(running ? 1 : 0.35)
-
-            Menu {
-                Button("Force Kill (SIGKILL)") { state.kill(pin.id, force: true) }
-                    .disabled(!running)
-                Button("Edit Project / Role…") {
-                    withAnimation(.easeInOut(duration: 0.15)) {
-                        screen = .assign(editing: pin.id)
-                    }
+            // Remaining actions fade up on hover but stay faintly visible.
+            Group {
+                IconButton(systemName: "arrow.clockwise", help: "Restart", tint: .blue) {
+                    state.restart(pin.id)
                 }
-                Divider()
-                Button(removeLabel, role: .destructive) { state.killAndRemove(pin.id) }
-                Button("Unpin (keep running)") { state.unpin(pin.id) }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 12, weight: .semibold))
-                    .frame(width: 24, height: 22)
-                    .contentShape(Rectangle())
+                IconButton(systemName: "stop.fill", help: "Kill (SIGTERM)", tint: .orange) {
+                    state.kill(pin.id, force: false)
+                }
+                .disabled(!running)
+                .opacity(running ? 1 : 0.35)
+
+                Menu {
+                    Button("Force Kill (SIGKILL)") { state.kill(pin.id, force: true) }
+                        .disabled(!running)
+                    Button("Edit Project / Role…") {
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            screen = .assign(editing: pin.id)
+                        }
+                    }
+                    Divider()
+                    Button(removeLabel, role: .destructive) { state.killAndRemove(pin.id) }
+                    Button("Unpin (keep running)") { state.unpin(pin.id) }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 12, weight: .semibold))
+                        .frame(width: 24, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .frame(width: 26)
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .frame(width: 26)
+            .opacity(hovering ? 1 : 0.4)
+            .animation(.easeInOut(duration: 0.12), value: hovering)
         }
-        .opacity(hovering ? 1 : 0.0)
-        .animation(.easeInOut(duration: 0.12), value: hovering)
     }
 
     private var removeLabel: String {

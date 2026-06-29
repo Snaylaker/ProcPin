@@ -82,14 +82,11 @@ final class AppState: ObservableObject {
         timer = nil
     }
 
-    /// Recompute statuses off the main thread (ps calls are blocking).
+    /// Recompute statuses off the main thread (single `ps` call for all pins).
     func refresh() {
         let snapshot = pins
         work.async {
-            var newStatuses: [UUID: ProcessStatus] = [:]
-            for pin in snapshot {
-                newStatuses[pin.id] = ProcessManager.status(for: pin)
-            }
+            let newStatuses = ProcessManager.statuses(for: snapshot)
             Task { @MainActor in self.statuses = newStatuses }
         }
         if scanAgentsEnabled { scanAgents() }

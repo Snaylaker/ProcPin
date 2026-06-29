@@ -108,28 +108,6 @@ enum ProcessManager {
 
     // MARK: - Status of a pinned process
 
-    /// Resolves the live status (running, uptime, CPU, memory) for a pin.
-    ///
-    /// A pin is considered running only if a process with its pid exists AND,
-    /// when we have a recorded start time, that start time still matches (to
-    /// guard against PID reuse).
-    static func status(for pin: PinnedProcess) -> ProcessStatus {
-        guard let sample = sample(forPID: pin.pid) else {
-            return ProcessStatus(pin: pin, isRunning: false, uptimeSeconds: nil,
-                                 cpuPercent: nil, memoryBytes: nil)
-        }
-        if let recorded = pin.observedStartEpoch {
-            // Allow a couple seconds of slack for formatting rounding.
-            if abs(sample.start.timeIntervalSince1970 - recorded) > 2 {
-                return ProcessStatus(pin: pin, isRunning: false, uptimeSeconds: nil,
-                                     cpuPercent: nil, memoryBytes: nil)
-            }
-        }
-        let uptime = Date().timeIntervalSince(sample.start)
-        return ProcessStatus(pin: pin, isRunning: true, uptimeSeconds: uptime,
-                             cpuPercent: sample.cpu, memoryBytes: sample.memoryBytes)
-    }
-
     private struct Sample {
         let start: Date
         let cpu: Double
@@ -151,6 +129,54 @@ enum ProcessManager {
         let cpu = Double(parts[5]) ?? 0
         let rssKB = UInt64(parts[6]) ?? 0
         return Sample(start: start, cpu: cpu, memoryBytes: rssKB * 1024)
+    }
+
+    /// Computes status for many pins using a SINGLE `ps` call (instead of one
+    /// per pin). This is the hot path used by the periodic refresh.
+    static func statuses(for pins: [PinnedProcess]) -> [UUID: ProcessStatus] {
+        guard !pins.isEmpty else { return [:] }
+        let rows = listAllDetailed()
+        var byPID: [Int32: ProcRow] = [:]
+        byPID.reserveCapacity(rows.count)
+        for r in rows { byPID[r.pid] = r }
+
+        let now = Date()
+        var result: [UUID: ProcessStatus] = [:]
+        result.reserveCapacity(pins.count)
+        for pin in pins {
+            guard let r = byPID[pin.pid] else {
+                result[pin.id] = ProcessStatus(pin: pin, isRunning: false, uptimeSeconds: nil,
+                                               cpuPercent: nil, memoryBytes: nil)
+                continue
+            }
+            // Guard against PID reuse by comparing start times.
+            if let recorded = pin.observedStartEpoch,
+               abs(r.startDate.timeIntervalSince1970 - recorded) > 2 {
+                result[pin.id] = ProcessStatus(pin: pin, isRunning: false, uptimeSeconds: nil,
+                                               cpuPercent: nil, memoryBytes: nil)
+                continue
+            }
+            result[pin.id] = ProcessStatus(pin: pin, isRunning: true,
+                                           uptimeSeconds: now.timeIntervalSince(r.startDate),
+                                           cpuPercent: r.cpuPercent, memoryBytes: r.memoryBytes)
+        }
+        return result
+    }
+
+    /// Single-pin status (used by one-off calls, not the refresh loop).
+    static func status(for pin: PinnedProcess) -> ProcessStatus {
+        guard let sample = sample(forPID: pin.pid) else {
+            return ProcessStatus(pin: pin, isRunning: false, uptimeSeconds: nil,
+                                 cpuPercent: nil, memoryBytes: nil)
+        }
+        if let recorded = pin.observedStartEpoch,
+           abs(sample.start.timeIntervalSince1970 - recorded) > 2 {
+            return ProcessStatus(pin: pin, isRunning: false, uptimeSeconds: nil,
+                                 cpuPercent: nil, memoryBytes: nil)
+        }
+        return ProcessStatus(pin: pin, isRunning: true,
+                             uptimeSeconds: Date().timeIntervalSince(sample.start),
+                             cpuPercent: sample.cpu, memoryBytes: sample.memoryBytes)
     }
 
     /// Returns the start date of a pid, or nil if it isn't running.
