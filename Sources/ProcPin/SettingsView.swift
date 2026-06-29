@@ -6,7 +6,7 @@ struct SettingsView: View {
     let onClose: () -> Void
 
     @AppStorage(Terminals.settingsKey) private var terminalID: String = "auto"
-    @AppStorage("ProcPin.showDock") private var showDock: Bool = true
+    @AppStorage("ProcPin.showDock") private var showDock: Bool = false
 
     var body: some View {
         VStack(spacing: 0) {

@@ -1,9 +1,10 @@
 import AppKit
 
-// Activation policy (Dock icon vs menu-bar-only) is set by AppDelegate from
-// the user's preference. Default to .regular so the Dock icon shows.
+// Menu-bar-only by default (no Dock icon). The user can opt into a Dock icon
+// via Settings, which sets ProcPin.showDock = true.
 let app = NSApplication.shared
-app.setActivationPolicy(UserDefaults.standard.object(forKey: "ProcPin.showDock") as? Bool == false ? .accessory : .regular)
+let showDock = UserDefaults.standard.bool(forKey: "ProcPin.showDock") // default false
+app.setActivationPolicy(showDock ? .regular : .accessory)
 
 // Top-level code runs on the main thread; assert that for the actor checker.
 let delegate = MainActor.assumeIsolated { AppDelegate() }
