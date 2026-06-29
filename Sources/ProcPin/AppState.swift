@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import AppKit
 
 /// Single source of truth for the UI. Holds pinned processes, refreshes their
 /// live status on a timer, and exposes actions (pin / unpin / kill / restart).
@@ -15,7 +16,7 @@ final class AppState: ObservableObject {
     @Published private(set) var agents: [Agents.Agent] = []
 
     // Update checking.
-    enum UpdateState: Equatable { case unknown, checking, upToDate, available(Updater.Release) }
+    enum UpdateState: Equatable { case unknown, checking, upToDate, available(Updater.Release), downloading, failed(String) }
     @Published var updateState: UpdateState = .unknown
     private var didAutoCheckUpdates = false
 
@@ -95,6 +96,23 @@ final class AppState: ObservableObject {
                 self.updateState = .available(release)
             } else {
                 self.updateState = .upToDate
+            }
+        }
+    }
+
+    /// Downloads and installs the available update, then relaunches.
+    func installUpdate() {
+        guard case .available(let release) = updateState else { return }
+        updateState = .downloading
+        Task { @MainActor in
+            let result = await Updater.installUpdate(release)
+            switch result {
+            case .success:
+                break // app will quit and relaunch
+            case .failure(let err):
+                self.updateState = .failed(err.description)
+                // Fall back to opening the release page after a moment.
+                NSWorkspace.shared.open(release.htmlURL)
             }
         }
     }

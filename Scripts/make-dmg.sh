@@ -37,3 +37,10 @@ hdiutil create \
 rm -rf "$STAGE_DIR"
 echo "==> Done: $DMG_PATH"
 ls -lh "$DMG_PATH"
+
+# 4. Also produce a .zip of the app for in-app auto-update.
+ZIP_PATH="$BUILD_DIR/$APP_NAME-$VERSION-mac.zip"
+echo "==> Creating $ZIP_PATH"
+rm -f "$ZIP_PATH"
+/usr/bin/ditto -c -k --sequesterRsrc --keepParent "$APP_DIR" "$ZIP_PATH"
+ls -lh "$ZIP_PATH"

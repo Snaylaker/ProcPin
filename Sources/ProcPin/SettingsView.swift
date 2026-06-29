@@ -78,27 +78,35 @@ struct SettingsView: View {
                 switch state.updateState {
                 case .available(let release):
                     Button {
-                        NSWorkspace.shared.open(release.htmlURL)
+                        state.installUpdate()
                     } label: {
-                        Label("Download \(release.version)", systemImage: "arrow.down.circle.fill")
+                        Label("Update to \(release.version) & Restart", systemImage: "arrow.down.circle.fill")
                             .font(.system(size: 12, weight: .semibold))
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
+                    Spacer()
+                    Button("Notes") { NSWorkspace.shared.open(release.htmlURL) }
+                        .buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(.secondary)
+                case .downloading:
+                    ProgressView().controlSize(.small)
+                    Text("Downloading & installing…").font(.system(size: 11)).foregroundStyle(.secondary)
                 case .checking:
-                    HStack(spacing: 6) {
-                        ProgressView().controlSize(.small)
-                        Text("Checking…").font(.system(size: 11)).foregroundStyle(.secondary)
-                    }
+                    ProgressView().controlSize(.small)
+                    Text("Checking…").font(.system(size: 11)).foregroundStyle(.secondary)
                 case .upToDate:
                     Label("Up to date", systemImage: "checkmark.circle.fill")
                         .font(.system(size: 11)).foregroundStyle(.green)
                     Spacer()
                     checkButton
+                case .failed(let msg):
+                    Label(msg, systemImage: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11)).foregroundStyle(.orange).lineLimit(2)
+                    Spacer()
+                    checkButton
                 case .unknown:
                     checkButton
                 }
-                if case .available = state.updateState { Spacer(); checkButton }
             }
         }
     }

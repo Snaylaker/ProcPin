@@ -163,17 +163,23 @@ struct ProcessListView: View {
 
     private var footer: some View {
         HStack(spacing: 10) {
-            if case .available(let release) = state.updateState {
+            switch state.updateState {
+            case .available(let release):
                 Button {
-                    NSWorkspace.shared.open(release.htmlURL)
+                    state.installUpdate()
                 } label: {
-                    Label("Update \(release.version)", systemImage: "arrow.down.circle.fill")
+                    Label("Update to \(release.version)", systemImage: "arrow.down.circle.fill")
                         .font(.system(size: 11, weight: .semibold))
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
-                .help("A new version is available — click to download")
-            } else {
+                .help("Download and install the new version, then relaunch")
+            case .downloading:
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("Updating…").font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+            default:
                 Text("\(state.pins.count) pinned")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
