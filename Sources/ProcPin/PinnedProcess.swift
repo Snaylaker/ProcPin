@@ -28,6 +28,8 @@ struct PinnedProcess: Codable, Identifiable, Equatable {
     /// tmux pane id (e.g. "%3") if this pin originated from a tmux pane.
     /// Lets us close the pane when removing the process.
     var tmuxPaneId: String?
+    /// Stable source key (tmux pane id or Ghostty tty) for identity reuse.
+    var sourceKey: String?
 
     init(
         id: UUID = UUID(),
@@ -38,7 +40,8 @@ struct PinnedProcess: Codable, Identifiable, Equatable {
         observedStartEpoch: Double? = nil,
         project: String = "",
         role: String = "",
-        tmuxPaneId: String? = nil
+        tmuxPaneId: String? = nil,
+        sourceKey: String? = nil
     ) {
         self.id = id
         self.pid = pid
@@ -49,11 +52,15 @@ struct PinnedProcess: Codable, Identifiable, Equatable {
         self.project = project
         self.role = role
         self.tmuxPaneId = tmuxPaneId
+        self.sourceKey = sourceKey
     }
 
-    // Backward-compatible decoding: older pins.json files have no project/role.
+    /// True when this row comes from tmux (vs Ghostty).
+    var isTmux: Bool { tmuxPaneId?.isEmpty == false }
+
+    // Backward-compatible decoding.
     enum CodingKeys: String, CodingKey {
-        case id, pid, name, command, workingDirectory, observedStartEpoch, project, role, tmuxPaneId
+        case id, pid, name, command, workingDirectory, observedStartEpoch, project, role, tmuxPaneId, sourceKey
     }
 
     init(from decoder: Decoder) throws {
@@ -67,6 +74,7 @@ struct PinnedProcess: Codable, Identifiable, Equatable {
         project = try c.decodeIfPresent(String.self, forKey: .project) ?? ""
         role = try c.decodeIfPresent(String.self, forKey: .role) ?? ""
         tmuxPaneId = try c.decodeIfPresent(String.self, forKey: .tmuxPaneId)
+        sourceKey = try c.decodeIfPresent(String.self, forKey: .sourceKey)
     }
 }
 

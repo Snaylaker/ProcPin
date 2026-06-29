@@ -279,21 +279,13 @@ struct ProjectSection: View {
     }
 
     private var projectMenu: some View {
-        let pc = state.projectPausedCount(project)
-        return Menu {
-            if pc.running - pc.paused > 0 {
-                Button("Pause All") { state.setProjectPaused(project, paused: true) }
-            }
-            if pc.paused > 0 {
-                Button("Resume All") { state.setProjectPaused(project, paused: false) }
-            }
-            if pc.running > 0 { Divider() }
+        Menu {
             if state.projectHasTmuxPanes(project) {
                 Button("Kill tmux Session “\(project)”", role: .destructive) {
                     state.killTmuxSession(project)
                 }
             }
-            Button("Close All Panes", role: .destructive) {
+            Button("Stop All", role: .destructive) {
                 state.killProjectAndRemove(project)
             }
         } label: {
@@ -323,13 +315,12 @@ struct ProcessRow: View {
 
     private var status: ProcessStatus? { state.statuses[pin.id] }
     private var running: Bool { status?.isRunning ?? false }
-    private var paused: Bool { status?.isPaused ?? false }
     private var ports: [Int] { Array((status?.ports ?? []).prefix(3)) }
-    private var isTmux: Bool { pin.tmuxPaneId?.isEmpty == false }
+    private var isTmux: Bool { pin.isTmux }
 
     /// True when the process exceeds the configured CPU or memory thresholds.
     private var isHot: Bool {
-        guard running, let s = status, !s.isPaused else { return false }
+        guard running, let s = status else { return false }
         let cpu = s.cpuPercent ?? 0
         let memMB = Double(s.memoryBytes ?? 0) / 1_048_576
         return (cpuAlert > 0 && cpu >= cpuAlert) || (memAlertMB > 0 && memMB >= memAlertMB)
@@ -367,7 +358,7 @@ struct ProcessRow: View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
                 Circle()
-                    .fill(paused ? Color.yellow : (running ? Color.green : Color.secondary.opacity(0.5)))
+                    .fill(running ? Color.green : Color.secondary.opacity(0.5))
                     .frame(width: 8, height: 8)
 
                 VStack(alignment: .leading, spacing: 2) {
@@ -415,7 +406,6 @@ struct ProcessRow: View {
 
     private var subtitle: String {
         guard running, let s = status else { return "not running · PID \(pin.pid)" }
-        if s.isPaused { return "paused · PID \(pin.pid)" }
         var parts = ["up \(Format.uptime(s.uptimeSeconds ?? 0))"]
         if let c = s.cpuPercent { parts.append("\(Format.cpu(c)) CPU") }
         if let m = s.memoryBytes { parts.append(Format.memory(m)) }
@@ -424,12 +414,12 @@ struct ProcessRow: View {
 
     private var actions: some View {
         HStack(spacing: 1) {
-            // Jump + Peek are always visible for tmux-pinned rows (key actions).
+            // Jump is available for both; Peek + Restart are tmux-only.
+            IconButton(systemName: "arrow.up.right.square", help: "Jump to terminal", tint: .purple) {
+                state.jumpToPane(pin.id)
+            }
             if isTmux {
-                IconButton(systemName: "arrow.up.right.square", help: "Jump to tmux pane", tint: .purple) {
-                    state.jumpToPane(pin.id)
-                }
-                IconButton(systemName: showPeek ? "text.alignleft" : "text.alignleft",
+                IconButton(systemName: "text.alignleft",
                            help: showPeek ? "Hide output" : "Peek output",
                            tint: showPeek ? .accentColor : .secondary) {
                     withAnimation(.easeInOut(duration: 0.15)) { showPeek.toggle() }
@@ -437,22 +427,18 @@ struct ProcessRow: View {
             }
             // Remaining actions fade up on hover but stay faintly visible.
             Group {
-                IconButton(systemName: "arrow.clockwise", help: "Restart", tint: .blue) {
-                    state.restart(pin.id)
+                if isTmux {
+                    IconButton(systemName: "arrow.clockwise", help: "Restart", tint: .blue) {
+                        state.restart(pin.id)
+                    }
                 }
-                IconButton(systemName: "stop.fill", help: "Kill (SIGTERM)", tint: .orange) {
+                IconButton(systemName: "stop.fill", help: isTmux ? "Interrupt (Ctrl-C)" : "Interrupt (SIGINT)", tint: .orange) {
                     state.kill(pin.id, force: false)
                 }
                 .disabled(!running)
                 .opacity(running ? 1 : 0.35)
 
                 Menu {
-                    if paused {
-                        Button("Resume") { state.setPaused(pin.id, paused: false) }
-                    } else {
-                        Button("Pause") { state.setPaused(pin.id, paused: true) }
-                            .disabled(!running)
-                    }
                     Button("Force Kill (SIGKILL)") { state.kill(pin.id, force: true) }
                         .disabled(!running)
                     Divider()
@@ -473,6 +459,6 @@ struct ProcessRow: View {
     }
 
     private var removeLabel: String {
-        (pin.tmuxPaneId?.isEmpty == false) ? "Kill & Close tmux Pane" : "Kill & Remove"
+        isTmux ? "Kill & Close tmux Pane" : "Stop"
     }
 }

@@ -120,13 +120,14 @@ final class AppState: ObservableObject {
         timer = nil
     }
 
-    /// Rebuilds the list directly from live tmux panes (no manual pinning), then
-    /// computes status — sharing a single `ps` snapshot between the two.
+    /// Rebuilds the list directly from the selected terminal source (tmux or
+    /// Ghostty), then computes status — sharing one `ps` snapshot.
     func refresh() {
         let existing = pins
+        let backend = TerminalBackend.selected
         work.async {
             let rows = ProcessManager.listAllDetailed()
-            let mirrored = Self.mirrorFromTmux(existing: existing, rows: rows)
+            let mirrored = Self.mirror(existing: existing, rows: rows, backend: backend)
             let newStatuses = ProcessManager.statuses(for: mirrored, rows: rows)
             Task { @MainActor in
                 self.pins = mirrored
@@ -136,42 +137,37 @@ final class AppState: ObservableObject {
         if scanAgentsEnabled { scanAgents() }
     }
 
-    /// Builds the pin list from every live tmux pane. Reuses each existing pin's
-    /// UUID (keyed by pane id) so SwiftUI identity and fold state stay stable.
-    private static func mirrorFromTmux(existing: [PinnedProcess], rows: [ProcessManager.ProcRow]) -> [PinnedProcess] {
-        let panes = Tmux.rawPanesByID()
-        guard !panes.isEmpty else { return [] }
+    /// Builds the list from live terminal surfaces. Reuses each existing pin's
+    /// UUID (keyed by source key) so SwiftUI identity and fold state stay stable.
+    private static func mirror(existing: [PinnedProcess], rows: [ProcessManager.ProcRow],
+                               backend: TerminalBackend) -> [PinnedProcess] {
+        let units = TerminalSource.units(backend: backend, rows: rows)
+        guard !units.isEmpty else { return [] }
 
         var byPID: [Int32: ProcessManager.ProcRow] = [:]
         for r in rows { byPID[r.pid] = r }
-        var idByPane: [String: UUID] = [:]
-        for p in existing { if let pane = p.tmuxPaneId { idByPane[pane] = p.id } }
+        var idByKey: [String: UUID] = [:]
+        for p in existing { if let k = p.sourceKey { idByKey[k] = p.id } }
 
-        var result: [PinnedProcess] = []
-        for (paneId, pane) in panes {
-            let fg = Tmux.resolveForegroundPID(tty: pane.tty, fallback: pane.panePID)
-            let row = byPID[fg]
-            let role = (!pane.windowName.isEmpty && pane.windowName != pane.currentCommand)
-                ? pane.windowName : pane.currentCommand
-            result.append(PinnedProcess(
-                id: idByPane[paneId] ?? UUID(),
-                pid: fg,
-                name: pane.currentCommand,
-                command: row?.command ?? pane.currentCommand,
-                workingDirectory: pane.currentPath.isEmpty ? nil : pane.currentPath,
-                observedStartEpoch: row?.startDate.timeIntervalSince1970,
-                project: pane.session,
-                role: role,
-                tmuxPaneId: paneId
-            ))
+        let result = units.map { u in
+            PinnedProcess(
+                id: idByKey[u.id] ?? UUID(),
+                pid: u.foregroundPID,
+                name: u.command,
+                command: u.fullCommand,
+                workingDirectory: u.cwd,
+                observedStartEpoch: byPID[u.foregroundPID]?.startDate.timeIntervalSince1970,
+                project: u.project,
+                role: u.role,
+                tmuxPaneId: u.tmuxPaneId,
+                sourceKey: u.id
+            )
         }
-        // Sort by session, then pane number for stable ordering.
-        func paneNum(_ id: String?) -> Int { Int(id?.replacingOccurrences(of: "%", with: "") ?? "") ?? 0 }
         return result.sorted { a, b in
             if a.project != b.project {
                 return a.project.localizedCaseInsensitiveCompare(b.project) == .orderedAscending
             }
-            return paneNum(a.tmuxPaneId) < paneNum(b.tmuxPaneId)
+            return (a.sourceKey ?? "") < (b.sourceKey ?? "")
         }
     }
 
@@ -198,7 +194,7 @@ final class AppState: ObservableObject {
         if let paneId = pin.tmuxPaneId, !paneId.isEmpty {
             Tmux.killPane(paneId)
         } else {
-            ProcessManager.kill(pid: pin.pid, force: true)
+            ProcessManager.killTree(pin.pid)
         }
         pins.removeAll { $0.id == id }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.refresh() }
@@ -218,73 +214,52 @@ final class AppState: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.refresh() }
     }
 
-    /// Closes every pane in a project (which stops its processes).
+    /// Closes/stops every surface in a project.
     func killProjectAndRemove(_ project: String) {
         for pin in pins where pin.project == project {
             if let paneId = pin.tmuxPaneId, !paneId.isEmpty {
                 Tmux.killPane(paneId)
             } else {
-                ProcessManager.kill(pid: pin.pid, force: true)
+                ProcessManager.killTree(pin.pid)
             }
         }
         pins.removeAll { $0.project == project }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.refresh() }
     }
 
+    /// Graceful stop (force = SIGKILL). tmux uses Ctrl-C in the pane; Ghostty
+    /// sends SIGINT to the foreground process group.
     func kill(_ id: UUID, force: Bool) {
         guard let pin = pins.first(where: { $0.id == id }) else { return }
-        if let paneId = pin.tmuxPaneId, !paneId.isEmpty, !force {
-            // Graceful stop inside the pane (Ctrl-C) for tmux processes.
+        if force {
+            ProcessManager.killTree(pin.pid)
+        } else if let paneId = pin.tmuxPaneId, !paneId.isEmpty {
             Tmux.interruptPane(paneId)
         } else {
-            ProcessManager.kill(pid: pin.pid, force: force)
+            ProcessManager.interrupt(pid: pin.pid)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.refresh() }
     }
 
-    /// Suspend (pause) or resume a single pinned process (whole subtree).
-    func setPaused(_ id: UUID, paused: Bool) {
-        guard let pin = pins.first(where: { $0.id == id }) else { return }
-        if paused { ProcessManager.suspendTree(pin.pid) }
-        else { ProcessManager.resumeTree(pin.pid) }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in self?.refresh() }
-    }
-
-    /// Suspend (pause) or resume every process in a project (each subtree).
-    func setProjectPaused(_ project: String, paused: Bool) {
-        for pin in pins where pin.project == project {
-            if paused { ProcessManager.suspendTree(pin.pid) }
-            else { ProcessManager.resumeTree(pin.pid) }
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in self?.refresh() }
-    }
-
-    /// Number of running/paused processes in a project (for menu state).
-    func projectPausedCount(_ project: String) -> (paused: Int, running: Int) {
-        var paused = 0, running = 0
-        for pin in pins where pin.project == project {
-            guard let s = statuses[pin.id], s.isRunning else { continue }
-            running += 1
-            if s.isPaused { paused += 1 }
-        }
-        return (paused, running)
-    }
-
+    /// Restart (tmux only): Ctrl-C + re-run the last command in the pane.
     func restart(_ id: UUID) {
         guard let pin = pins.first(where: { $0.id == id }),
               let paneId = pin.tmuxPaneId, !paneId.isEmpty else { return }
-        // Restart inside the tmux pane (Ctrl-C + re-run last command).
         Tmux.restartPane(paneId)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in self?.refresh() }
     }
 
-    /// Focuses the tmux pane a process runs in and raises its terminal window.
+    /// Focuses the surface: tmux switches the client + raises the terminal;
+    /// Ghostty just activates the app.
     func jumpToPane(_ id: UUID) {
-        guard let pin = pins.first(where: { $0.id == id }),
-              let paneId = pin.tmuxPaneId, !paneId.isEmpty else { return }
-        work.async {
-            let tty = Tmux.focusPane(paneId)
-            Task { @MainActor in Focus.raiseTerminal(tty: tty) }
+        guard let pin = pins.first(where: { $0.id == id }) else { return }
+        if let paneId = pin.tmuxPaneId, !paneId.isEmpty {
+            work.async {
+                let tty = Tmux.focusPane(paneId)
+                Task { @MainActor in Focus.raiseTerminal(tty: tty) }
+            }
+        } else {
+            Focus.activateGhostty()
         }
     }
 

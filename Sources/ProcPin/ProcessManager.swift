@@ -24,6 +24,7 @@ enum ProcessManager {
         let cpuPercent: Double
         let memoryBytes: UInt64
         let stat: String        // ps state code, e.g. "S", "R", "T" (stopped)
+        let tty: String         // controlling terminal, e.g. "s004" or "??"
         var isStopped: Bool { stat.contains("T") }
         var name: String {
             let exe = command.split(separator: " ").first.map(String.init) ?? command
@@ -33,26 +34,27 @@ enum ProcessManager {
 
     /// Returns every process with its parent pid (for process-tree views).
     static func listAllDetailed() -> [ProcRow] {
-        // pid, ppid, %cpu, rss(KB), state, lstart (5 tokens), then full command.
-        guard let out = runCapturing("/bin/ps", ["-axo", "pid=,ppid=,%cpu=,rss=,state=,lstart=,command="]) else {
+        // pid, ppid, %cpu, rss(KB), state, tty, lstart (5 tokens), then command.
+        guard let out = runCapturing("/bin/ps", ["-axo", "pid=,ppid=,%cpu=,rss=,state=,tty=,lstart=,command="]) else {
             return []
         }
         var result: [ProcRow] = []
         for line in out.split(separator: "\n") {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             let parts = trimmed.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
-            // pid + ppid + cpu + rss + state + 5 lstart + >=1 command = 11
-            guard parts.count >= 11,
+            // pid + ppid + cpu + rss + state + tty + 5 lstart + >=1 command = 12
+            guard parts.count >= 12,
                   let pid = Int32(parts[0]),
                   let ppid = Int32(parts[1]) else { continue }
             let cpu = Double(parts[2]) ?? 0
             let rssKB = UInt64(parts[3]) ?? 0
             let stat = parts[4]
-            let lstart = parts[5...9].joined(separator: " ")
+            let tty = parts[5]
+            let lstart = parts[6...10].joined(separator: " ")
             guard let start = lstartFormatter.date(from: lstart) else { continue }
-            let command = parts[10...].joined(separator: " ")
+            let command = parts[11...].joined(separator: " ")
             result.append(ProcRow(pid: pid, ppid: ppid, startDate: start, command: command,
-                                  cpuPercent: cpu, memoryBytes: rssKB * 1024, stat: stat))
+                                  cpuPercent: cpu, memoryBytes: rssKB * 1024, stat: stat, tty: tty))
         }
         return result
     }
@@ -210,15 +212,15 @@ enum ProcessManager {
         return Darwin.kill(pid, sig) == 0
     }
 
-    /// Suspends a process (SIGSTOP) — freezes it without terminating.
+    /// Sends SIGINT (Ctrl-C) to a process's group — graceful interrupt.
     @discardableResult
-    static func suspend(pid: Int32) -> Bool { Darwin.kill(pid, SIGSTOP) == 0 }
+    static func interrupt(pid: Int32) -> Bool {
+        let pgid = getpgid(pid)
+        if pgid > 0 { return killpg(pgid, SIGINT) == 0 }
+        return Darwin.kill(pid, SIGINT) == 0
+    }
 
-    /// Resumes a suspended process (SIGCONT).
-    @discardableResult
-    static func resume(pid: Int32) -> Bool { Darwin.kill(pid, SIGCONT) == 0 }
-
-    /// Returns a pid and all of its descendant pids (deepest last not guaranteed).
+    /// Returns a pid and all of its descendant pids.
     static func subtreePIDs(_ root: Int32) -> [Int32] {
         let rows = listAllDetailed()
         var childrenByPPID: [Int32: [Int32]] = [:]
@@ -234,15 +236,9 @@ enum ProcessManager {
         return out
     }
 
-    /// Suspends/resumes a process and all of its descendants. Pausing only the
-    /// parent leaves child workers (e.g. a dev server's node children) running,
-    /// so we signal the whole tree.
-    static func suspendTree(_ root: Int32) {
-        // Stop children first, then the parent, to avoid the parent respawning.
-        for pid in subtreePIDs(root).reversed() { _ = Darwin.kill(pid, SIGSTOP) }
-    }
-    static func resumeTree(_ root: Int32) {
-        for pid in subtreePIDs(root) { _ = Darwin.kill(pid, SIGCONT) }
+    /// SIGKILLs a process and its whole subtree (children first).
+    static func killTree(_ root: Int32) {
+        for pid in subtreePIDs(root).reversed() { _ = Darwin.kill(pid, SIGKILL) }
     }
 
     /// Kills the current process (if any) and relaunches it from its command

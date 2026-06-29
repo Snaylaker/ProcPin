@@ -9,6 +9,7 @@ struct SettingsView: View {
     @AppStorage("ProcPin.showDock") private var showDock: Bool = false
     @AppStorage("ProcPin.cpuAlert") private var cpuAlert: Double = 100
     @AppStorage("ProcPin.memAlertMB") private var memAlertMB: Double = 1500
+    @AppStorage(TerminalBackend.settingsKey) private var sourceID: String = "tmux"
 
     var body: some View {
         VStack(spacing: 0) {
@@ -17,6 +18,7 @@ struct SettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     updatesSection
+                    sourceSection
                     section(title: "General", subtitle: "") {
                         Toggle(isOn: $showDock) {
                             VStack(alignment: .leading, spacing: 1) {
@@ -40,6 +42,20 @@ struct SettingsView: View {
                 .padding(14)
             }
             .frame(maxHeight: 600)
+        }
+    }
+
+    // MARK: Source
+
+    private var sourceSection: some View {
+        section(title: "Source", subtitle: "Which terminal to mirror in the list.") {
+            Picker("", selection: $sourceID) {
+                ForEach(TerminalBackend.allCases, id: \.rawValue) { b in
+                    Text(b.displayName).tag(b.rawValue)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
         }
     }
 
