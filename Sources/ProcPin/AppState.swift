@@ -2,24 +2,20 @@ import Foundation
 import Combine
 import AppKit
 
-/// Single source of truth for the UI. Holds pinned processes, refreshes their
-/// live status on a timer, and exposes actions (pin / unpin / kill / restart).
+/// Single source of truth for the UI. Mirrors live tmux panes and exposes
+/// controls over them.
 @MainActor
 final class AppState: ObservableObject {
     /// All pins, in user order.
     @Published private(set) var pins: [PinnedProcess] = []
     /// Latest computed status keyed by pin id.
     @Published private(set) var statuses: [UUID: ProcessStatus] = [:]
-    /// Detected AI agents and their process trees (only scanned when enabled).
-    @Published private(set) var agents: [Agents.Agent] = []
-
     // Update checking.
     enum UpdateState: Equatable { case unknown, checking, upToDate, available(Updater.Release), downloading, failed(String) }
     @Published var updateState: UpdateState = .unknown
     private var didAutoCheckUpdates = false
 
     private var timer: Timer?
-    private var scanAgentsEnabled = false
     private let work = DispatchQueue(label: "com.procpin.refresh", qos: .userInitiated)
 
     init() {
@@ -120,28 +116,25 @@ final class AppState: ObservableObject {
         timer = nil
     }
 
-    /// Rebuilds the list directly from the selected terminal source (tmux or
-    /// Ghostty), then computes status — sharing one `ps` snapshot.
+    /// Rebuilds the list directly from live tmux panes, then computes status —
+    /// sharing one `ps` snapshot.
     func refresh() {
         let existing = pins
-        let backend = TerminalBackend.selected
         work.async {
             let rows = ProcessManager.listAllDetailed()
-            let mirrored = Self.mirror(existing: existing, rows: rows, backend: backend)
+            let mirrored = Self.mirrorFromTmux(existing: existing, rows: rows)
             let newStatuses = ProcessManager.statuses(for: mirrored, rows: rows)
             Task { @MainActor in
                 self.pins = mirrored
                 self.statuses = newStatuses
             }
         }
-        if scanAgentsEnabled { scanAgents() }
     }
 
-    /// Builds the list from live terminal surfaces. Reuses each existing pin's
-    /// UUID (keyed by source key) so SwiftUI identity and fold state stay stable.
-    private static func mirror(existing: [PinnedProcess], rows: [ProcessManager.ProcRow],
-                               backend: TerminalBackend) -> [PinnedProcess] {
-        let units = TerminalSource.units(backend: backend, rows: rows)
+    /// Builds the list from live tmux panes. Reuses each existing pin's UUID
+    /// (keyed by pane id) so SwiftUI identity and fold state stay stable.
+    private static func mirrorFromTmux(existing: [PinnedProcess], rows: [ProcessManager.ProcRow]) -> [PinnedProcess] {
+        let units = TerminalSource.units(rows: rows)
         guard !units.isEmpty else { return [] }
 
         var byPID: [Int32: ProcessManager.ProcRow] = [:]
@@ -171,31 +164,13 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// Enable/disable agent tree scanning (driven by the Agents tab).
-    func setAgentScanning(_ on: Bool) {
-        scanAgentsEnabled = on
-        if on { scanAgents() } else { agents = [] }
-    }
-
-    /// Scan running AI agents and their process trees off the main thread.
-    func scanAgents() {
-        work.async {
-            let found = Agents.scan()
-            Task { @MainActor in self.agents = found }
-        }
-    }
-
     // MARK: - Process actions
 
     /// Closes the tmux pane (which stops whatever runs inside it). The list
     /// updates on the next refresh.
     func killAndRemove(_ id: UUID) {
         guard let pin = pins.first(where: { $0.id == id }) else { return }
-        if let paneId = pin.tmuxPaneId, !paneId.isEmpty {
-            Tmux.killPane(paneId)
-        } else {
-            ProcessManager.killTree(pin.pid)
-        }
+        if let paneId = pin.tmuxPaneId, !paneId.isEmpty { Tmux.killPane(paneId) }
         pins.removeAll { $0.id == id }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.refresh() }
     }
@@ -217,26 +192,19 @@ final class AppState: ObservableObject {
     /// Closes/stops every surface in a project.
     func killProjectAndRemove(_ project: String) {
         for pin in pins where pin.project == project {
-            if let paneId = pin.tmuxPaneId, !paneId.isEmpty {
-                Tmux.killPane(paneId)
-            } else {
-                ProcessManager.killTree(pin.pid)
-            }
+            if let paneId = pin.tmuxPaneId, !paneId.isEmpty { Tmux.killPane(paneId) }
         }
         pins.removeAll { $0.project == project }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.refresh() }
     }
 
-    /// Graceful stop (force = SIGKILL). tmux uses Ctrl-C in the pane; Ghostty
-    /// sends SIGINT to the foreground process group.
+    /// Graceful stop (force = SIGKILL).
     func kill(_ id: UUID, force: Bool) {
         guard let pin = pins.first(where: { $0.id == id }) else { return }
         if force {
             ProcessManager.killTree(pin.pid)
         } else if let paneId = pin.tmuxPaneId, !paneId.isEmpty {
             Tmux.interruptPane(paneId)
-        } else {
-            ProcessManager.interrupt(pid: pin.pid)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.refresh() }
     }
@@ -249,8 +217,7 @@ final class AppState: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in self?.refresh() }
     }
 
-    /// Focuses the surface: tmux switches the client + raises the terminal;
-    /// Ghostty just activates the app.
+    /// Focuses the tmux pane and raises its terminal window.
     func jumpToPane(_ id: UUID) {
         guard let pin = pins.first(where: { $0.id == id }) else { return }
         if let paneId = pin.tmuxPaneId, !paneId.isEmpty {
@@ -258,8 +225,6 @@ final class AppState: ObservableObject {
                 let tty = Tmux.focusPane(paneId)
                 Task { @MainActor in Focus.raiseTerminal(tty: tty) }
             }
-        } else {
-            Focus.activateGhostty()
         }
     }
 
@@ -281,16 +246,6 @@ final class AppState: ObservableObject {
         UserDefaults.standard.set(Array(collapsedProjects), forKey: collapsedKey)
     }
 
-    // MARK: - Agent tree actions
-
-    /// Kill any pid by number (used by the agent tree). Re-scans afterwards.
-    func killPID(_ pid: Int32, force: Bool) {
-        ProcessManager.kill(pid: pid, force: force)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-            self?.scanAgents()
-            self?.refresh()
-        }
-    }
 }
 
 // MARK: - Formatting helpers

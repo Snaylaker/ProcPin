@@ -40,16 +40,4 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     func popoverDidClose(_ notification: Notification) {
         state.stopAutoRefresh()
     }
-
-    /// Clicking the Dock icon opens the panel from the menu bar item.
-    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if !popover.isShown { togglePopover(nil) }
-        return true
-    }
-
-    /// Switches between showing a Dock icon and menu-bar-only.
-    static func setDockVisible(_ visible: Bool) {
-        NSApp.setActivationPolicy(visible ? .regular : .accessory)
-        if visible { NSApp.activate(ignoringOtherApps: true) }
-    }
 }

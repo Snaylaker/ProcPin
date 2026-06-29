@@ -1,8 +1,6 @@
 import SwiftUI
 
-/// Top-level popover content. Switches between the process list and the
-/// add/edit screens (sheets are unreliable inside an NSPopover, so we page
-/// in-place instead).
+/// Top-level popover content.
 struct RootView: View {
     @ObservedObject var state: AppState
 
@@ -37,28 +35,16 @@ struct ProcessListView: View {
     @ObservedObject var state: AppState
     @Binding var screen: RootView.Screen
 
-    enum ViewMode: String, CaseIterable { case pinned = "Pinned", agents = "Agents" }
-    @State private var viewMode: ViewMode = .pinned
-
     private let hPad: CGFloat = 18
 
     var body: some View {
         VStack(spacing: 0) {
             header
-            modePicker
-            if viewMode == .pinned {
-                hairline
-                content
-            } else {
-                AgentsView(state: state, screen: $screen)
-            }
+            hairline
+            content
             hairline
             footer
         }
-        .onChange(of: viewMode) { mode in
-            state.setAgentScanning(mode == .agents)
-        }
-        .onDisappear { state.setAgentScanning(false) }
     }
 
     private var hairline: some View {
@@ -93,19 +79,6 @@ struct ProcessListView: View {
         return "\(running) of \(state.pins.count) running · \(Format.cpu(totalCPU)) CPU"
     }
 
-    private var modePicker: some View {
-        Picker("", selection: $viewMode) {
-            ForEach(ViewMode.allCases, id: \.self) { mode in
-                Text(mode == .agents ? "Agents\(state.agents.isEmpty ? "" : " \(state.agents.count)")" : mode.rawValue)
-                    .tag(mode)
-            }
-        }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .padding(.horizontal, hPad)
-        .padding(.bottom, 12)
-    }
-
     // MARK: Content
 
     @ViewBuilder
@@ -124,8 +97,7 @@ struct ProcessListView: View {
                 VStack(spacing: 0) {
                     ForEach(Array(groups.enumerated()), id: \.element.project) { idx, group in
                         if idx > 0 { hairline.padding(.horizontal, hPad) }
-                        ProjectSection(state: state, screen: $screen,
-                                       project: group.project, pins: group.pins)
+                        ProjectSection(state: state, project: group.project, pins: group.pins)
                     }
                 }
                 .padding(.vertical, 4)
@@ -199,7 +171,6 @@ struct ProcessListView: View {
 
 struct ProjectSection: View {
     @ObservedObject var state: AppState
-    @Binding var screen: RootView.Screen
     let project: String
     let pins: [PinnedProcess]
 
@@ -260,7 +231,7 @@ struct ProjectSection: View {
                 // Rows.
                 VStack(spacing: 2) {
                     ForEach(pins) { pin in
-                        ProcessRow(state: state, screen: $screen, pin: pin)
+                        ProcessRow(state: state, pin: pin)
                     }
                 }
                 .padding(.top, 2)
@@ -305,7 +276,6 @@ struct ProjectSection: View {
 
 struct ProcessRow: View {
     @ObservedObject var state: AppState
-    @Binding var screen: RootView.Screen
     let pin: PinnedProcess
     @State private var hovering = false
     @State private var showPeek = false
@@ -379,8 +349,8 @@ struct ProcessRow: View {
                     }
                     Text(subtitle)
                         .font(.system(size: 11))
-                        .foregroundStyle(isHot ? .orange : .secondary)
-                        .lineLimit(1)
+                    .foregroundStyle(isHot ? .orange : .secondary)
+                    .lineLimit(1)
                 }
 
                 Spacer(minLength: 6)
@@ -414,7 +384,7 @@ struct ProcessRow: View {
 
     private var actions: some View {
         HStack(spacing: 1) {
-            // Jump is available for both; Peek + Restart are tmux-only.
+            // Primary actions: Jump, Restart, Stop, More.
             IconButton(systemName: "arrow.up.right.square", help: "Jump to terminal", tint: .purple) {
                 state.jumpToPane(pin.id)
             }
@@ -432,7 +402,7 @@ struct ProcessRow: View {
                         state.restart(pin.id)
                     }
                 }
-                IconButton(systemName: "stop.fill", help: isTmux ? "Interrupt (Ctrl-C)" : "Interrupt (SIGINT)", tint: .orange) {
+                IconButton(systemName: "stop.fill", help: "Stop", tint: .orange) {
                     state.kill(pin.id, force: false)
                 }
                 .disabled(!running)
@@ -459,6 +429,6 @@ struct ProcessRow: View {
     }
 
     private var removeLabel: String {
-        isTmux ? "Kill & Close tmux Pane" : "Stop"
+        "Kill & Close tmux Pane"
     }
 }

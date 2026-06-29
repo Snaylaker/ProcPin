@@ -28,7 +28,7 @@ struct PinnedProcess: Codable, Identifiable, Equatable {
     /// tmux pane id (e.g. "%3") if this pin originated from a tmux pane.
     /// Lets us close the pane when removing the process.
     var tmuxPaneId: String?
-    /// Stable source key (tmux pane id or Ghostty tty) for identity reuse.
+    /// Stable source key (tmux pane id) for identity reuse.
     var sourceKey: String?
 
     init(
@@ -55,7 +55,7 @@ struct PinnedProcess: Codable, Identifiable, Equatable {
         self.sourceKey = sourceKey
     }
 
-    /// True when this row comes from tmux (vs Ghostty).
+    /// True when this row comes from tmux.
     var isTmux: Bool { tmuxPaneId?.isEmpty == false }
 
     // Backward-compatible decoding.

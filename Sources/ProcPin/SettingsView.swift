@@ -1,15 +1,13 @@
 import SwiftUI
 
-/// App settings. Currently: choose the terminal used by "Jump to tmux pane".
+/// App settings.
 struct SettingsView: View {
     @ObservedObject var state: AppState
     let onClose: () -> Void
 
     @AppStorage(Terminals.settingsKey) private var terminalID: String = "auto"
-    @AppStorage("ProcPin.showDock") private var showDock: Bool = false
     @AppStorage("ProcPin.cpuAlert") private var cpuAlert: Double = 100
     @AppStorage("ProcPin.memAlertMB") private var memAlertMB: Double = 1500
-    @AppStorage(TerminalBackend.settingsKey) private var sourceID: String = "tmux"
 
     var body: some View {
         VStack(spacing: 0) {
@@ -18,17 +16,6 @@ struct SettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     updatesSection
-                    sourceSection
-                    section(title: "General", subtitle: "") {
-                        Toggle(isOn: $showDock) {
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text("Show Dock icon").font(.system(size: 12.5))
-                                Text("Off = menu bar only").font(.system(size: 10)).foregroundStyle(.secondary)
-                            }
-                        }
-                        .toggleStyle(.switch)
-                        .onChange(of: showDock) { AppDelegate.setDockVisible($0) }
-                    }
                     alertsSection
                     section(title: "Terminal", subtitle: "Used when jumping to a tmux pane. Auto-detect figures out the hosting terminal from the pane's tty; pick a specific app if that doesn't work.") {
                         VStack(spacing: 2) {
@@ -42,20 +29,6 @@ struct SettingsView: View {
                 .padding(14)
             }
             .frame(maxHeight: 600)
-        }
-    }
-
-    // MARK: Source
-
-    private var sourceSection: some View {
-        section(title: "Source", subtitle: "Which terminal to mirror in the list.") {
-            Picker("", selection: $sourceID) {
-                ForEach(TerminalBackend.allCases, id: \.rawValue) { b in
-                    Text(b.displayName).tag(b.rawValue)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
         }
     }
 

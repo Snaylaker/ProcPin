@@ -13,13 +13,6 @@ enum Focus {
         "alacritty", "kitty", "hyper", "warp", "tabby", "rio", "wave", "termius"
     ]
 
-    /// Brings the Ghostty app to the front (Ghostty has no per-tab targeting).
-    @MainActor
-    static func activateGhostty() {
-        let running = NSRunningApplication.runningApplications(withBundleIdentifier: "com.mitchellh.ghostty")
-        running.first?.activate(options: [.activateIgnoringOtherApps])
-    }
-
     /// Activates the terminal app hosting `tty`. If the user picked a specific
     /// terminal in Settings, that app is activated directly; otherwise we walk
     /// the tty's process ancestry to find the hosting terminal.
