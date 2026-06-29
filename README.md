@@ -10,6 +10,7 @@ No Dock icon, no window — just a pin icon in the top bar with a rich SwiftUI d
 - 🗂️ **Projects**: group processes (e.g. *Project One* → Frontend / Backend) with a per-project capacity summary
 - 🔎 **Search** across project, role, name, and command
 - 🧩 **Auto-detect tmux**: one click imports your tmux sessions — each session becomes a project, each pane is tracked by its window/command (foreground process resolved automatically)
+- 🤖 **Agents tab**: auto-detects running AI coding agents (Claude Code, OpenCode, Codex, Aider, Gemini, Goose, pi) and shows the **live process tree** each one spawned (MCP servers, running commands, sub-agents) — kill any node or pin it into a project
 - ⏱️ Live uptime (`3d 4h`, `2h 13m`, `5m 02s`, …)
 - 📊 **Capacity hint**: CPU meter + memory per process, aggregated per project
 - 🟢 / 🔴 running indicator, refreshed live while open
@@ -80,10 +81,26 @@ Sources/ProcPin/
   AppState.swift        # observable view model + refresh loop + formatting
   ProcessManager.swift  # ps/kill integration: list, uptime, CPU/mem, restart
   Tmux.swift            # tmux session/pane detection + foreground PID resolve
+  Agents.swift          # AI agent detection + process-tree builder
+  AgentsView.swift      # live agent process-tree UI
   PinnedProcess.swift   # data model + live status
   Store.swift           # JSON persistence
 Scripts/build-app.sh    # packages build/ProcPin.app
+Scripts/make-dmg.sh     # packages build/ProcPin-<version>.dmg
 ```
+
+## Agents tab — how it works
+
+Agent detection is **tool-agnostic**: an agent is just a process, and the
+commands / MCP servers / sub-agents it runs are its OS **child processes**.
+`Agents.scan()` lists every process with its parent pid, identifies roots by
+command signature (`claude`, `opencode`, `codex`, `aider`, `gemini`, `goose`,
+`pi`), then walks the parent→child map to build each tree. Nested sub-agents
+appear inside their parent's tree (deduped by ancestor check).
+
+Note: this shows what an agent is running **right now** — short-lived tool
+commands that already exited won't appear (that history lives in each tool's
+session transcript, e.g. `~/.claude/projects/*.jsonl`).
 
 ## Roadmap
 

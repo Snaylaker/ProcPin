@@ -11,8 +11,11 @@ final class AppState: ObservableObject {
     @Published private(set) var statuses: [UUID: ProcessStatus] = [:]
     /// Live processes available to pin (refreshed when the picker opens).
     @Published private(set) var liveProcesses: [ProcessManager.LiveProcess] = []
+    /// Detected AI agents and their process trees (only scanned when enabled).
+    @Published private(set) var agents: [Agents.Agent] = []
 
     private var timer: Timer?
+    private var scanAgentsEnabled = false
     private let work = DispatchQueue(label: "com.procpin.refresh", qos: .userInitiated)
 
     init() {
@@ -88,6 +91,21 @@ final class AppState: ObservableObject {
                 newStatuses[pin.id] = ProcessManager.status(for: pin)
             }
             Task { @MainActor in self.statuses = newStatuses }
+        }
+        if scanAgentsEnabled { scanAgents() }
+    }
+
+    /// Enable/disable agent tree scanning (driven by the Agents tab).
+    func setAgentScanning(_ on: Bool) {
+        scanAgentsEnabled = on
+        if on { scanAgents() } else { agents = [] }
+    }
+
+    /// Scan running AI agents and their process trees off the main thread.
+    func scanAgents() {
+        work.async {
+            let found = Agents.scan()
+            Task { @MainActor in self.agents = found }
         }
     }
 
@@ -197,6 +215,34 @@ final class AppState: ObservableObject {
             persist()
         }
         refresh()
+    }
+
+    // MARK: - Agent tree actions
+
+    /// Kill any pid by number (used by the agent tree). Re-scans afterwards.
+    func killPID(_ pid: Int32, force: Bool) {
+        ProcessManager.kill(pid: pid, force: force)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            self?.scanAgents()
+            self?.refresh()
+        }
+    }
+
+    /// Pin a process by raw pid (e.g. an MCP server from an agent tree).
+    func pinPID(_ pid: Int32, name: String, project: String, role: String) {
+        guard !pins.contains(where: { $0.pid == pid }) else { return }
+        let command = ProcessManager.commandLine(forPID: pid) ?? name
+        let start = ProcessManager.startDate(forPID: pid)?.timeIntervalSince1970
+        let pin = PinnedProcess(
+            pid: pid,
+            name: name,
+            command: command,
+            workingDirectory: nil,
+            observedStartEpoch: start,
+            project: project,
+            role: role
+        )
+        addPin(pin)
     }
 
     private func persist() {

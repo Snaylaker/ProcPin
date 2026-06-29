@@ -46,6 +46,45 @@ enum ProcessManager {
         return result.sorted { $0.startDate > $1.startDate }
     }
 
+    /// A process row including its parent pid, for building process trees.
+    struct ProcRow {
+        let pid: Int32
+        let ppid: Int32
+        let startDate: Date
+        let command: String
+        let cpuPercent: Double
+        let memoryBytes: UInt64
+        var name: String {
+            let exe = command.split(separator: " ").first.map(String.init) ?? command
+            return (exe as NSString).lastPathComponent
+        }
+    }
+
+    /// Returns every process with its parent pid (for process-tree views).
+    static func listAllDetailed() -> [ProcRow] {
+        // pid, ppid, %cpu, rss(KB), lstart (5 tokens), then full command.
+        guard let out = runCapturing("/bin/ps", ["-axo", "pid=,ppid=,%cpu=,rss=,lstart=,command="]) else {
+            return []
+        }
+        var result: [ProcRow] = []
+        for line in out.split(separator: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let parts = trimmed.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
+            // pid + ppid + cpu + rss + 5 lstart + >=1 command = 10
+            guard parts.count >= 10,
+                  let pid = Int32(parts[0]),
+                  let ppid = Int32(parts[1]) else { continue }
+            let cpu = Double(parts[2]) ?? 0
+            let rssKB = UInt64(parts[3]) ?? 0
+            let lstart = parts[4...8].joined(separator: " ")
+            guard let start = lstartFormatter.date(from: lstart) else { continue }
+            let command = parts[9...].joined(separator: " ")
+            result.append(ProcRow(pid: pid, ppid: ppid, startDate: start, command: command,
+                                  cpuPercent: cpu, memoryBytes: rssKB * 1024))
+        }
+        return result
+    }
+
     /// Parses a line of `ps -axo pid=,%cpu=,rss=,lstart=,command=`.
     /// Example: "1234 12.3 123456 Mon Jun 29 16:17:00 2026 /usr/bin/node server.js"
     private static func parsePSLine(_ line: String) -> LiveProcess? {

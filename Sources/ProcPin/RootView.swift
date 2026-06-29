@@ -38,16 +38,42 @@ struct ProcessListView: View {
     @Binding var screen: RootView.Screen
     @State private var search = ""
 
+    enum ViewMode: String, CaseIterable { case pinned = "Pinned", agents = "Agents" }
+    @State private var viewMode: ViewMode = .pinned
+
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider()
-            searchBar
+            modePicker
             Divider().opacity(0.5)
-            content
+            if viewMode == .pinned {
+                searchBar
+                Divider().opacity(0.5)
+                content
+            } else {
+                AgentsView(state: state, screen: $screen)
+            }
             Divider()
             footer
         }
+        .onChange(of: viewMode) { mode in
+            state.setAgentScanning(mode == .agents)
+        }
+        .onDisappear { state.setAgentScanning(false) }
+    }
+
+    private var modePicker: some View {
+        Picker("", selection: $viewMode) {
+            ForEach(ViewMode.allCases, id: \.self) { mode in
+                Text(mode == .agents ? "Agents\(state.agents.isEmpty ? "" : " (\(state.agents.count))")" : mode.rawValue)
+                    .tag(mode)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
     }
 
     private var header: some View {
