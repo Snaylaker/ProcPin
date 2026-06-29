@@ -31,8 +31,8 @@ struct RootView: View {
                 .transition(.opacity)
             }
         }
-        .frame(width: 384)
-        .frame(minHeight: 220)
+        .frame(width: 460)
+        .frame(minHeight: 280)
         .background(.regularMaterial)
     }
 }
@@ -42,7 +42,6 @@ struct RootView: View {
 struct ProcessListView: View {
     @ObservedObject var state: AppState
     @Binding var screen: RootView.Screen
-    @State private var search = ""
 
     enum ViewMode: String, CaseIterable { case pinned = "Pinned", agents = "Agents" }
     @State private var viewMode: ViewMode = .pinned
@@ -54,7 +53,6 @@ struct ProcessListView: View {
             header
             modePicker
             if viewMode == .pinned {
-                searchBar
                 hairline
                 content
             } else {
@@ -122,39 +120,14 @@ struct ProcessListView: View {
         .padding(.bottom, 12)
     }
 
-    private var searchBar: some View {
-        HStack(spacing: 7) {
-            Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
-                .font(.system(size: 12))
-            TextField("Search project, role, name…", text: $search)
-                .textFieldStyle(.plain)
-                .font(.system(size: 12))
-            if !search.isEmpty {
-                Button { search = "" } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.horizontal, 11)
-        .padding(.vertical, 8)
-        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .padding(.horizontal, hPad)
-        .padding(.bottom, 12)
-    }
-
     // MARK: Content
 
     @ViewBuilder
     private var content: some View {
-        let groups = state.groupedPins(filter: search)
+        let groups = state.groupedPins(filter: "")
         if state.pins.isEmpty {
             emptyState(icon: "tray", title: "No pinned processes",
                        subtitle: "Click Add to pin a running process, run a command, or import a tmux session.")
-        } else if groups.isEmpty {
-            emptyState(icon: "magnifyingglass", title: "No matches",
-                       subtitle: "Nothing matches “\(search)”.")
         } else {
             ScrollView {
                 VStack(spacing: 0) {
@@ -166,7 +139,7 @@ struct ProcessListView: View {
                 }
                 .padding(.vertical, 4)
             }
-            .frame(maxHeight: 440)
+            .frame(maxHeight: 600)
         }
     }
 
@@ -353,6 +326,27 @@ struct ProcessRow: View {
     private var status: ProcessStatus? { state.statuses[pin.id] }
     private var running: Bool { status?.isRunning ?? false }
     private var paused: Bool { status?.isPaused ?? false }
+    private var ports: [Int] { Array((status?.ports ?? []).prefix(3)) }
+
+    /// A clickable port chip that opens http://localhost:PORT in the browser.
+    private func portChip(_ port: Int) -> some View {
+        Button {
+            if let url = URL(string: "http://localhost:\(port)") {
+                NSWorkspace.shared.open(url)
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: "globe").font(.system(size: 8, weight: .semibold))
+                Text(":\(port)").font(.system(size: 10, weight: .semibold, design: .rounded))
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Color.blue.opacity(0.15), in: Capsule())
+            .foregroundStyle(.blue)
+        }
+        .buttonStyle(.plain)
+        .help("Open http://localhost:\(port)")
+    }
 
     var body: some View {
         HStack(spacing: 10) {
@@ -366,6 +360,9 @@ struct ProcessRow: View {
                         .font(.system(size: 13, weight: .semibold))
                         .lineLimit(1)
                     if !pin.role.isEmpty { Badge(text: pin.role) }
+                    ForEach(ports, id: \.self) { port in
+                        portChip(port)
+                    }
                 }
                 Text(subtitle)
                     .font(.system(size: 11))

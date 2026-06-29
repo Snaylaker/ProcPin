@@ -19,6 +19,7 @@ No Dock icon, no window — just a pin icon in the top bar with a rich SwiftUI d
 - ⬆️ **Update check**: tells you when a newer release is available and links to the download
 - ⏱️ Live uptime (`3d 4h`, `2h 13m`, `5m 02s`, …)
 - 📊 **Capacity hint**: CPU meter + memory per process, aggregated per project
+- 🌐 **Ports**: shows the TCP port a process listens on — click the `:3000` chip to open `localhost:3000` in your browser
 - 🟢 / 🔴 running indicator, refreshed live while open
 - 🔁 Restart (graceful kill + relaunch) · ⛔ Kill (SIGTERM) · 💀 Force Kill (SIGKILL)
 - 💾 Pins persist (`~/Library/Application Support/ProcPin/pins.json`)

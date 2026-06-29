@@ -23,7 +23,7 @@ struct AgentsView: View {
                     }
                     .padding(.vertical, 4)
                 }
-                .frame(maxHeight: 460)
+                .frame(maxHeight: 600)
             }
         }
         .onAppear { state.setAgentScanning(true) }

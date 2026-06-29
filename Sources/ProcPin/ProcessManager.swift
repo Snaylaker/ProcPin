@@ -142,6 +142,7 @@ enum ProcessManager {
         var byPID: [Int32: ProcRow] = [:]
         byPID.reserveCapacity(rows.count)
         for r in rows { byPID[r.pid] = r }
+        let portMap = listeningPorts()
 
         let now = Date()
         var result: [UUID: ProcessStatus] = [:]
@@ -162,7 +163,8 @@ enum ProcessManager {
             result[pin.id] = ProcessStatus(pin: pin, isRunning: true,
                                            uptimeSeconds: now.timeIntervalSince(r.startDate),
                                            cpuPercent: r.cpuPercent, memoryBytes: r.memoryBytes,
-                                           isPaused: r.isStopped)
+                                           isPaused: r.isStopped,
+                                           ports: portMap[pin.pid] ?? [])
         }
         return result
     }
@@ -204,6 +206,27 @@ enum ProcessManager {
             return []
         }
         return out.split(separator: "\n").compactMap { Int32($0.trimmingCharacters(in: .whitespaces)) }
+    }
+
+    /// Maps pid -> sorted TCP ports it is listening on (single `lsof` call).
+    static func listeningPorts() -> [Int32: [Int]] {
+        guard let out = runCapturing("/usr/sbin/lsof",
+                                     ["-nP", "-iTCP", "-sTCP:LISTEN", "-Fpn"]) else {
+            return [:]
+        }
+        var map: [Int32: Set<Int>] = [:]
+        var current: Int32?
+        for line in out.split(separator: "\n") {
+            if line.hasPrefix("p") {
+                current = Int32(line.dropFirst())
+            } else if line.hasPrefix("n"), let pid = current {
+                // name like "*:3000", "127.0.0.1:3000", "[::1]:3000"
+                if let portStr = line.split(separator: ":").last, let port = Int(portStr) {
+                    map[pid, default: []].insert(port)
+                }
+            }
+        }
+        return map.mapValues { $0.sorted() }
     }
 
     // MARK: - Actions

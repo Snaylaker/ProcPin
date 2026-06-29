@@ -83,4 +83,6 @@ struct ProcessStatus: Equatable {
     let memoryBytes: UInt64?
     /// True if the process is suspended (SIGSTOP / ps state "T").
     var isPaused: Bool = false
+    /// TCP ports the process is listening on (for "open in browser").
+    var ports: [Int] = []
 }
