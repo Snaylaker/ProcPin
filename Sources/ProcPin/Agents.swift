@@ -21,6 +21,8 @@ enum Agents {
         let kind: String          // e.g. "Claude Code"
         let root: ProcessManager.ProcRow
         let nodes: [Node]         // includes the root at depth 0
+        var cwd: String?          // working directory of the agent
+        var currentTask: String?  // latest user prompt from the active transcript
         var id: Int32 { root.pid }
 
         /// Number of spawned descendant processes (excluding the root).
@@ -79,10 +81,47 @@ enum Agents {
         for (pid, label) in rootKind where !hasRootAncestor(pid) {
             guard let root = byPID[pid] else { continue }
             let nodes = flatten(root: root, childrenByPPID: childrenByPPID)
-            agents.append(Agent(kind: label, root: root, nodes: nodes))
+            var agent = Agent(kind: label, root: root, nodes: nodes)
+            agent.cwd = resolveCwd(ofPID: pid)
+            agent.currentTask = AgentTask.current(kind: label, cwd: agent.cwd)
+            agents.append(agent)
         }
         // Newest agent first.
         return agents.sorted { $0.root.startDate > $1.root.startDate }
+    }
+
+    // MARK: - Working directory resolution
+
+    /// Cache of pid → cwd (a process's cwd is stable for its lifetime).
+    nonisolated(unsafe) private static var cwdCache: [Int32: String] = [:]
+
+    /// Resolves a process's working directory via `lsof` (cached).
+    static func resolveCwd(ofPID pid: Int32) -> String? {
+        if let c = cwdCache[pid] { return c }
+        guard let out = run("/usr/sbin/lsof", ["-a", "-p", "\(pid)", "-d", "cwd", "-Fn"]) else {
+            return nil
+        }
+        for line in out.split(separator: "\n") where line.hasPrefix("n") {
+            let path = String(line.dropFirst())
+            if !path.isEmpty {
+                cwdCache[pid] = path
+                return path
+            }
+        }
+        return nil
+    }
+
+    private static func run(_ path: String, _ args: [String]) -> String? {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: path)
+        task.arguments = args
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError = FileHandle.nullDevice
+        do { try task.run() } catch { return nil }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        task.waitUntilExit()
+        return String(data: data, encoding: .utf8)
     }
 
     /// Returns the agent label if a process matches a known signature.

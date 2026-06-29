@@ -58,6 +58,9 @@ private struct AgentCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             cardHeader
+            if let task = agent.currentTask, !task.isEmpty {
+                taskBanner(task)
+            }
             VStack(spacing: 3) {
                 ForEach(agent.nodes) { node in
                     AgentNodeRow(state: state, agent: agent, node: node)
@@ -76,13 +79,38 @@ private struct AgentCard: View {
         .padding(.horizontal, 10)
     }
 
+    private func taskBanner(_ task: String) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: "quote.opening")
+                .font(.system(size: 9))
+                .foregroundStyle(.tint)
+                .padding(.top, 2)
+            Text(task)
+                .font(.system(size: 11))
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 7)
+        .background(Color.accentColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+    }
+
     private var cardHeader: some View {
         HStack(spacing: 8) {
             Image(systemName: "sparkles")
                 .font(.system(size: 12))
                 .foregroundStyle(.tint)
             VStack(alignment: .leading, spacing: 1) {
-                Text(agent.kind).font(.system(size: 13, weight: .bold))
+                HStack(spacing: 6) {
+                    Text(agent.kind).font(.system(size: 13, weight: .bold))
+                    if let cwd = agent.cwd {
+                        Text((cwd as NSString).lastPathComponent)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(.tint)
+                    }
+                }
                 Text("PID \(agent.root.pid) · \(agent.childCount) spawned · up \(Format.uptime(uptime(agent.root.startDate)))")
                     .font(.system(size: 10, design: .rounded))
                     .foregroundStyle(.secondary)
