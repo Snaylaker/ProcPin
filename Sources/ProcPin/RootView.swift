@@ -211,42 +211,64 @@ struct ProjectSection: View {
 
     var body: some View {
         let cap = state.capacity(forProject: project)
+        let collapsed = state.isCollapsed(project)
         VStack(alignment: .leading, spacing: 9) {
-            // Title row.
+            // Title row (click to fold/unfold).
             HStack(spacing: 7) {
-                Text(project.isEmpty ? "Ungrouped" : project)
-                    .font(.system(size: 15, weight: .bold))
+                Button {
+                    withAnimation(.easeInOut(duration: 0.16)) { state.toggleCollapsed(project) }
+                } label: {
+                    HStack(spacing: 7) {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.secondary)
+                            .rotationEffect(.degrees(collapsed ? 0 : 90))
+                        Text(project.isEmpty ? "Ungrouped" : project)
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(.primary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
                 Spacer()
                 Text("\(cap.running)/\(cap.total) up")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
+                if collapsed && cap.running > 0 {
+                    Text("· \(Format.cpu(cap.cpu))")
+                        .font(.system(size: 11, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
                 projectMenu
             }
 
-            // Full-width usage bar + label row.
-            if cap.total > 0 {
-                MeterBar(fraction: cap.running == 0 ? 0 : min(cap.cpu / 100.0, 1),
-                         tint: tint(forCPU: cap.cpu), height: 6)
-                HStack {
-                    Text(cap.running == 0 ? "idle" : "\(Format.cpu(cap.cpu)) CPU")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    if cap.running > 0 {
-                        Text(Format.memory(cap.memory))
+            if !collapsed {
+                // Full-width usage bar + label row.
+                if cap.total > 0 {
+                    MeterBar(fraction: cap.running == 0 ? 0 : min(cap.cpu / 100.0, 1),
+                             tint: tint(forCPU: cap.cpu), height: 6)
+                    HStack {
+                        Text(cap.running == 0 ? "idle" : "\(Format.cpu(cap.cpu)) CPU")
                             .font(.system(size: 11))
                             .foregroundStyle(.secondary)
+                        Spacer()
+                        if cap.running > 0 {
+                            Text(Format.memory(cap.memory))
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
-            }
 
-            // Rows.
-            VStack(spacing: 2) {
-                ForEach(pins) { pin in
-                    ProcessRow(state: state, screen: $screen, pin: pin)
+                // Rows.
+                VStack(spacing: 2) {
+                    ForEach(pins) { pin in
+                        ProcessRow(state: state, screen: $screen, pin: pin)
+                    }
                 }
+                .padding(.top, 2)
             }
-            .padding(.top, 2)
         }
         .padding(.horizontal, hPad)
         .padding(.vertical, 14)
@@ -337,6 +359,11 @@ struct ProcessRow: View {
 
     private var actions: some View {
         HStack(spacing: 1) {
+            if pin.tmuxPaneId?.isEmpty == false {
+                IconButton(systemName: "arrow.up.right.square", help: "Jump to tmux pane", tint: .purple) {
+                    state.jumpToPane(pin.id)
+                }
+            }
             IconButton(systemName: "arrow.clockwise", help: "Restart", tint: .blue) {
                 state.restart(pin.id)
             }

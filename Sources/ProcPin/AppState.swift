@@ -282,6 +282,34 @@ final class AppState: ObservableObject {
         refresh()
     }
 
+    /// Focuses the tmux pane a process runs in and raises its terminal window.
+    func jumpToPane(_ id: UUID) {
+        guard let pin = pins.first(where: { $0.id == id }),
+              let paneId = pin.tmuxPaneId, !paneId.isEmpty else { return }
+        work.async {
+            let tty = Tmux.focusPane(paneId)
+            Task { @MainActor in Focus.raiseTerminal(tty: tty) }
+        }
+    }
+
+    // MARK: - Collapsed (folded) projects
+
+    private let collapsedKey = "ProcPin.collapsedProjects"
+    @Published private(set) var collapsedProjects: Set<String> = {
+        Set(UserDefaults.standard.stringArray(forKey: "ProcPin.collapsedProjects") ?? [])
+    }()
+
+    func isCollapsed(_ project: String) -> Bool { collapsedProjects.contains(project) }
+
+    func toggleCollapsed(_ project: String) {
+        if collapsedProjects.contains(project) {
+            collapsedProjects.remove(project)
+        } else {
+            collapsedProjects.insert(project)
+        }
+        UserDefaults.standard.set(Array(collapsedProjects), forKey: collapsedKey)
+    }
+
     // MARK: - Agent tree actions
 
     /// Kill any pid by number (used by the agent tree). Re-scans afterwards.

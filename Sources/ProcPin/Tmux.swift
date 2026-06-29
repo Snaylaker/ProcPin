@@ -84,6 +84,35 @@ enum Tmux {
         return r.stdout.split(separator: "\n").contains { $0 == Substring(name) }
     }
 
+    /// Focuses a pane: selects its window + pane and switches the attached
+    /// client to its session. Returns the client tty that now shows it (if any),
+    /// so the caller can raise the hosting terminal window.
+    @discardableResult
+    static func focusPane(_ paneId: String) -> String? {
+        guard let tmux = tmuxPath(), !paneId.isEmpty else { return nil }
+        _ = runFull(tmux, ["select-window", "-t", paneId])
+        _ = runFull(tmux, ["select-pane", "-t", paneId])
+        _ = runFull(tmux, ["switch-client", "-t", paneId])
+        return clientTTY(forPane: paneId)
+    }
+
+    /// The tty of an attached client viewing the pane's session, if any.
+    static func clientTTY(forPane paneId: String) -> String? {
+        guard let tmux = tmuxPath(), !paneId.isEmpty else { return nil }
+        let sess = runFull(tmux, ["display-message", "-p", "-t", paneId, "#{session_name}"])
+            .stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sess.isEmpty else { return nil }
+        let clients = runFull(tmux, ["list-clients", "-F", "#{client_session}\t#{client_tty}"])
+        guard clients.status == 0 else { return nil }
+        for line in clients.stdout.split(separator: "\n") {
+            let f = line.components(separatedBy: "\t")
+            if f.count == 2, f[0] == sess, !f[1].isEmpty {
+                return f[1]
+            }
+        }
+        return nil
+    }
+
     /// Lists all panes across all sessions, with the tracked process resolved.
     static func detect() -> Result<[Pane], DetectError> {
         guard let tmux = tmuxPath() else { return .failure(.notInstalled) }

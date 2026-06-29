@@ -167,6 +167,15 @@ enum ProcessManager {
         return s.isEmpty ? nil : s
     }
 
+    /// Returns the pids running on a tty (e.g. "ttys003" or "/dev/ttys003").
+    static func pids(onTTY tty: String) -> [Int32] {
+        let dev = tty.hasPrefix("/dev/") ? String(tty.dropFirst(5)) : tty
+        guard !dev.isEmpty, let out = runCapturing("/bin/ps", ["-t", dev, "-o", "pid="]) else {
+            return []
+        }
+        return out.split(separator: "\n").compactMap { Int32($0.trimmingCharacters(in: .whitespaces)) }
+    }
+
     // MARK: - Actions
 
     /// Sends SIGTERM (graceful) or SIGKILL (force) to a pid.

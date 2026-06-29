@@ -52,7 +52,9 @@ Click **Add** to open the assign screen, which has three modes:
 
 In the list, each process shows uptime + a CPU/memory meter. Hover a row to
 **Restart** or **Kill**; the **⋯** menu has Force Kill, *Edit Project / Role*,
-**Kill & Remove**, and *Unpin (keep running)*.
+**Kill & Remove**, and *Unpin (keep running)*. Click a **project title** to
+fold/unfold it (collapse state is remembered). Processes pinned from tmux also
+get a **jump** button (↗) that focuses the pane and raises its terminal window.
 
 For a process pinned from tmux, **Kill & Remove** becomes **Kill & Close tmux
 Pane** — it runs `tmux kill-pane` to close the originating pane (which also
