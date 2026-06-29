@@ -4,6 +4,7 @@ import AppKit
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 
-let delegate = AppDelegate()
+// Top-level code runs on the main thread; assert that for the actor checker.
+let delegate = MainActor.assumeIsolated { AppDelegate() }
 app.delegate = delegate
 app.run()

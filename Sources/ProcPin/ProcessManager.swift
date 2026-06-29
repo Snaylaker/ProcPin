@@ -15,6 +15,8 @@ enum ProcessManager {
         let pid: Int32
         let startDate: Date
         let command: String
+        let cpuPercent: Double
+        let memoryBytes: UInt64
         /// Short name derived from the command (basename of argv[0]).
         var name: String {
             let exe = command.split(separator: " ").first.map(String.init) ?? command
@@ -31,8 +33,8 @@ enum ProcessManager {
 
     /// Returns all running processes owned by the user, newest first.
     static func listProcesses() -> [LiveProcess] {
-        // pid, lstart (5 tokens), then full command.
-        guard let out = runCapturing("/bin/ps", ["-axo", "pid=,lstart=,command="]) else {
+        // pid, %cpu, rss(KB), lstart (5 tokens), then full command.
+        guard let out = runCapturing("/bin/ps", ["-axo", "pid=,%cpu=,rss=,lstart=,command="]) else {
             return []
         }
         var result: [LiveProcess] = []
@@ -44,48 +46,86 @@ enum ProcessManager {
         return result.sorted { $0.startDate > $1.startDate }
     }
 
-    /// Parses a line of `ps -axo pid=,lstart=,command=`.
-    /// Example: "  1234 Mon Jun 29 16:17:00 2026 /usr/bin/node server.js"
+    /// Parses a line of `ps -axo pid=,%cpu=,rss=,lstart=,command=`.
+    /// Example: "1234 12.3 123456 Mon Jun 29 16:17:00 2026 /usr/bin/node server.js"
     private static func parsePSLine(_ line: String) -> LiveProcess? {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         let parts = trimmed.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
-        // Need: pid + 5 lstart tokens + at least 1 command token.
-        guard parts.count >= 7, let pid = Int32(parts[0]) else { return nil }
-        let lstart = parts[1...5].joined(separator: " ")
+        // Need: pid + cpu + rss + 5 lstart tokens + at least 1 command token.
+        guard parts.count >= 9, let pid = Int32(parts[0]) else { return nil }
+        let cpu = Double(parts[1]) ?? 0
+        let rssKB = UInt64(parts[2]) ?? 0
+        let lstart = parts[3...7].joined(separator: " ")
         guard let startDate = lstartFormatter.date(from: lstart) else { return nil }
-        let command = parts[6...].joined(separator: " ")
-        return LiveProcess(pid: pid, startDate: startDate, command: command)
+        let command = parts[8...].joined(separator: " ")
+        return LiveProcess(
+            pid: pid,
+            startDate: startDate,
+            command: command,
+            cpuPercent: cpu,
+            memoryBytes: rssKB * 1024
+        )
     }
 
     // MARK: - Status of a pinned process
 
-    /// Resolves the live status (running + uptime) for a pin.
+    /// Resolves the live status (running, uptime, CPU, memory) for a pin.
     ///
     /// A pin is considered running only if a process with its pid exists AND,
     /// when we have a recorded start time, that start time still matches (to
     /// guard against PID reuse).
     static func status(for pin: PinnedProcess) -> ProcessStatus {
-        guard let start = startDate(forPID: pin.pid) else {
-            return ProcessStatus(pin: pin, isRunning: false, uptimeSeconds: nil)
+        guard let sample = sample(forPID: pin.pid) else {
+            return ProcessStatus(pin: pin, isRunning: false, uptimeSeconds: nil,
+                                 cpuPercent: nil, memoryBytes: nil)
         }
         if let recorded = pin.observedStartEpoch {
             // Allow a couple seconds of slack for formatting rounding.
-            if abs(start.timeIntervalSince1970 - recorded) > 2 {
-                return ProcessStatus(pin: pin, isRunning: false, uptimeSeconds: nil)
+            if abs(sample.start.timeIntervalSince1970 - recorded) > 2 {
+                return ProcessStatus(pin: pin, isRunning: false, uptimeSeconds: nil,
+                                     cpuPercent: nil, memoryBytes: nil)
             }
         }
-        let uptime = Date().timeIntervalSince(start)
-        return ProcessStatus(pin: pin, isRunning: true, uptimeSeconds: uptime)
+        let uptime = Date().timeIntervalSince(sample.start)
+        return ProcessStatus(pin: pin, isRunning: true, uptimeSeconds: uptime,
+                             cpuPercent: sample.cpu, memoryBytes: sample.memoryBytes)
+    }
+
+    private struct Sample {
+        let start: Date
+        let cpu: Double
+        let memoryBytes: UInt64
+    }
+
+    /// One `ps` call returning start time + CPU + memory for a pid.
+    private static func sample(forPID pid: Int32) -> Sample? {
+        guard let out = runCapturing("/bin/ps", ["-o", "lstart=,%cpu=,rss=", "-p", "\(pid)"]) else {
+            return nil
+        }
+        let trimmed = out.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let parts = trimmed.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
+        // lstart (5) + cpu + rss
+        guard parts.count >= 7 else { return nil }
+        let lstart = parts[0...4].joined(separator: " ")
+        guard let start = lstartFormatter.date(from: lstart) else { return nil }
+        let cpu = Double(parts[5]) ?? 0
+        let rssKB = UInt64(parts[6]) ?? 0
+        return Sample(start: start, cpu: cpu, memoryBytes: rssKB * 1024)
     }
 
     /// Returns the start date of a pid, or nil if it isn't running.
     static func startDate(forPID pid: Int32) -> Date? {
-        guard let out = runCapturing("/bin/ps", ["-o", "lstart=", "-p", "\(pid)"]) else {
+        sample(forPID: pid)?.start
+    }
+
+    /// Returns the full command line of a pid, if available.
+    static func commandLine(forPID pid: Int32) -> String? {
+        guard let out = runCapturing("/bin/ps", ["-o", "command=", "-p", "\(pid)"]) else {
             return nil
         }
         let s = out.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !s.isEmpty else { return nil }
-        return lstartFormatter.date(from: s)
+        return s.isEmpty ? nil : s
     }
 
     // MARK: - Actions
