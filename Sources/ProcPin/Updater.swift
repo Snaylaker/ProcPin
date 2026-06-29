@@ -3,7 +3,7 @@ import Foundation
 /// Static app metadata.
 enum AppInfo {
     /// Current app version. Bump this with each release (matches the git tag).
-    static let version = "1.9.0"
+    static let version = "1.10.0"
     /// GitHub repo "owner/name" used for update checks and the releases page.
     static let repo = "Snaylaker/ProcPin"
     static var releasesURL: URL { URL(string: "https://github.com/\(repo)/releases/latest")! }
