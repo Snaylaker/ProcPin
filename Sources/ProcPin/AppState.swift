@@ -166,6 +166,24 @@ final class AppState: ObservableObject {
         persist()
     }
 
+    /// Kills the process, closes its tmux pane (if it came from one), and
+    /// removes the pin from the list. Returns true if a tmux pane was closed.
+    @discardableResult
+    func killAndRemove(_ id: UUID) -> Bool {
+        guard let pin = pins.first(where: { $0.id == id }) else { return false }
+        var closedPane = false
+        if let paneId = pin.tmuxPaneId, !paneId.isEmpty {
+            // Closing the pane also kills the process running inside it.
+            closedPane = Tmux.killPane(paneId)
+        }
+        if !closedPane {
+            // No tmux pane (or tmux unavailable): kill the process directly.
+            ProcessManager.kill(pid: pin.pid, force: true)
+        }
+        unpin(id)
+        return closedPane
+    }
+
     /// Pins a set of tmux panes in one go. Each pane's session becomes the
     /// project and its window/command becomes the role. Returns count added.
     @discardableResult
@@ -183,7 +201,8 @@ final class AppState: ObservableObject {
                 workingDirectory: pane.currentPath.isEmpty ? nil : pane.currentPath,
                 observedStartEpoch: start,
                 project: pane.session,
-                role: pane.suggestedRole
+                role: pane.suggestedRole,
+                tmuxPaneId: pane.paneId
             )
             pins.append(pin)
             added += 1

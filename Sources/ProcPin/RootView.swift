@@ -338,7 +338,8 @@ struct ProcessRow: View {
                     }
                 }
                 Divider()
-                Button("Unpin", role: .destructive) { state.unpin(pin.id) }
+                Button(removeLabel, role: .destructive) { state.killAndRemove(pin.id) }
+                Button("Unpin (keep running)") { state.unpin(pin.id) }
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 12, weight: .semibold))
@@ -349,5 +350,12 @@ struct ProcessRow: View {
             .frame(width: 28)
         }
         .opacity(hovering ? 1 : 0.55)
+    }
+
+    /// Label reflects whether removing will also close a tmux pane.
+    private var removeLabel: String {
+        (pin.tmuxPaneId?.isEmpty == false)
+            ? "Kill & Close tmux Pane"
+            : "Kill & Remove"
     }
 }

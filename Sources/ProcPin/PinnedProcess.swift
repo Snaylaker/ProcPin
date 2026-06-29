@@ -25,6 +25,9 @@ struct PinnedProcess: Codable, Identifiable, Equatable {
     var project: String
     /// User-defined role within the project (e.g. "Frontend", "Backend").
     var role: String
+    /// tmux pane id (e.g. "%3") if this pin originated from a tmux pane.
+    /// Lets us close the pane when removing the process.
+    var tmuxPaneId: String?
 
     init(
         id: UUID = UUID(),
@@ -34,7 +37,8 @@ struct PinnedProcess: Codable, Identifiable, Equatable {
         workingDirectory: String? = nil,
         observedStartEpoch: Double? = nil,
         project: String = "",
-        role: String = ""
+        role: String = "",
+        tmuxPaneId: String? = nil
     ) {
         self.id = id
         self.pid = pid
@@ -44,11 +48,12 @@ struct PinnedProcess: Codable, Identifiable, Equatable {
         self.observedStartEpoch = observedStartEpoch
         self.project = project
         self.role = role
+        self.tmuxPaneId = tmuxPaneId
     }
 
     // Backward-compatible decoding: older pins.json files have no project/role.
     enum CodingKeys: String, CodingKey {
-        case id, pid, name, command, workingDirectory, observedStartEpoch, project, role
+        case id, pid, name, command, workingDirectory, observedStartEpoch, project, role, tmuxPaneId
     }
 
     init(from decoder: Decoder) throws {
@@ -61,6 +66,7 @@ struct PinnedProcess: Codable, Identifiable, Equatable {
         observedStartEpoch = try c.decodeIfPresent(Double.self, forKey: .observedStartEpoch)
         project = try c.decodeIfPresent(String.self, forKey: .project) ?? ""
         role = try c.decodeIfPresent(String.self, forKey: .role) ?? ""
+        tmuxPaneId = try c.decodeIfPresent(String.self, forKey: .tmuxPaneId)
     }
 }
 

@@ -52,7 +52,13 @@ Click **Add** to open the assign screen, which has three modes:
 
 In the list, each process shows uptime + a CPU/memory meter. Hover a row to
 **Restart** or **Kill**; the **⋯** menu has Force Kill, *Edit Project / Role*,
-and Unpin.
+**Kill & Remove**, and *Unpin (keep running)*.
+
+For a process pinned from tmux, **Kill & Remove** becomes **Kill & Close tmux
+Pane** — it runs `tmux kill-pane` to close the originating pane (which also
+stops the process) and removes it from the list. For non-tmux processes it
+force-kills the process and removes the pin. **Unpin (keep running)** only drops
+it from ProcPin's list without touching the process.
 
 ## How tmux detection works
 

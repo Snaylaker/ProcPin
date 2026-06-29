@@ -59,6 +59,14 @@ enum Tmux {
     /// Returns true if tmux is installed.
     static var isInstalled: Bool { tmuxPath() != nil }
 
+    /// Closes a tmux pane (which also kills whatever runs inside it). If the
+    /// pane is the last in its window/session, tmux closes those too.
+    @discardableResult
+    static func killPane(_ paneId: String) -> Bool {
+        guard let tmux = tmuxPath() else { return false }
+        return runFull(tmux, ["kill-pane", "-t", paneId]).status == 0
+    }
+
     /// Lists all panes across all sessions, with the tracked process resolved.
     static func detect() -> Result<[Pane], DetectError> {
         guard let tmux = tmuxPath() else { return .failure(.notInstalled) }
