@@ -15,6 +15,8 @@ No Dock icon, no window — just a pin icon in the top bar with a rich SwiftUI d
 - 🤖 **Agents tab**: auto-detects running AI coding agents (Claude Code, OpenCode, Codex, Aider, Gemini, Goose, pi) and shows the **live process tree** each one spawned (MCP servers, running commands, sub-agents) — kill any node or pin it into a project
 - 📝 **Current task**: for Claude Code, shows what each agent is *working on right now* (latest prompt from its active session transcript)
 - ⚙️ **Settings**: pick your terminal (Ghostty, iTerm2, Terminal, WezTerm, kitty, …) so *Jump to pane* raises the right window
+- ⏸️ **Pause / Resume**: suspend (SIGSTOP) and resume (SIGCONT) a process — or a whole project at once
+- ⬆️ **Update check**: tells you when a newer release is available and links to the download
 - ⏱️ Live uptime (`3d 4h`, `2h 13m`, `5m 02s`, …)
 - 📊 **Capacity hint**: CPU meter + memory per process, aggregated per project
 - 🟢 / 🔴 running indicator, refreshed live while open

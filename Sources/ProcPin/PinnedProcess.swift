@@ -81,4 +81,6 @@ struct ProcessStatus: Equatable {
     let cpuPercent: Double?
     /// Resident memory in bytes.
     let memoryBytes: UInt64?
+    /// True if the process is suspended (SIGSTOP / ps state "T").
+    var isPaused: Bool = false
 }

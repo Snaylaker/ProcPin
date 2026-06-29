@@ -54,6 +54,8 @@ enum ProcessManager {
         let command: String
         let cpuPercent: Double
         let memoryBytes: UInt64
+        let stat: String        // ps state code, e.g. "S", "R", "T" (stopped)
+        var isStopped: Bool { stat.contains("T") }
         var name: String {
             let exe = command.split(separator: " ").first.map(String.init) ?? command
             return (exe as NSString).lastPathComponent
@@ -62,25 +64,26 @@ enum ProcessManager {
 
     /// Returns every process with its parent pid (for process-tree views).
     static func listAllDetailed() -> [ProcRow] {
-        // pid, ppid, %cpu, rss(KB), lstart (5 tokens), then full command.
-        guard let out = runCapturing("/bin/ps", ["-axo", "pid=,ppid=,%cpu=,rss=,lstart=,command="]) else {
+        // pid, ppid, %cpu, rss(KB), state, lstart (5 tokens), then full command.
+        guard let out = runCapturing("/bin/ps", ["-axo", "pid=,ppid=,%cpu=,rss=,state=,lstart=,command="]) else {
             return []
         }
         var result: [ProcRow] = []
         for line in out.split(separator: "\n") {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             let parts = trimmed.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
-            // pid + ppid + cpu + rss + 5 lstart + >=1 command = 10
-            guard parts.count >= 10,
+            // pid + ppid + cpu + rss + state + 5 lstart + >=1 command = 11
+            guard parts.count >= 11,
                   let pid = Int32(parts[0]),
                   let ppid = Int32(parts[1]) else { continue }
             let cpu = Double(parts[2]) ?? 0
             let rssKB = UInt64(parts[3]) ?? 0
-            let lstart = parts[4...8].joined(separator: " ")
+            let stat = parts[4]
+            let lstart = parts[5...9].joined(separator: " ")
             guard let start = lstartFormatter.date(from: lstart) else { continue }
-            let command = parts[9...].joined(separator: " ")
+            let command = parts[10...].joined(separator: " ")
             result.append(ProcRow(pid: pid, ppid: ppid, startDate: start, command: command,
-                                  cpuPercent: cpu, memoryBytes: rssKB * 1024))
+                                  cpuPercent: cpu, memoryBytes: rssKB * 1024, stat: stat))
         }
         return result
     }
@@ -158,7 +161,8 @@ enum ProcessManager {
             }
             result[pin.id] = ProcessStatus(pin: pin, isRunning: true,
                                            uptimeSeconds: now.timeIntervalSince(r.startDate),
-                                           cpuPercent: r.cpuPercent, memoryBytes: r.memoryBytes)
+                                           cpuPercent: r.cpuPercent, memoryBytes: r.memoryBytes,
+                                           isPaused: r.isStopped)
         }
         return result
     }
@@ -210,6 +214,14 @@ enum ProcessManager {
         let sig = force ? SIGKILL : SIGTERM
         return Darwin.kill(pid, sig) == 0
     }
+
+    /// Suspends a process (SIGSTOP) — freezes it without terminating.
+    @discardableResult
+    static func suspend(pid: Int32) -> Bool { Darwin.kill(pid, SIGSTOP) == 0 }
+
+    /// Resumes a suspended process (SIGCONT).
+    @discardableResult
+    static func resume(pid: Int32) -> Bool { Darwin.kill(pid, SIGCONT) == 0 }
 
     /// Kills the current process (if any) and relaunches it from its command
     /// line. Returns the new pid on success.

@@ -25,7 +25,7 @@ struct RootView: View {
                 }
                 .transition(.opacity)
             case .settings:
-                SettingsView {
+                SettingsView(state: state) {
                     withAnimation(.easeInOut(duration: 0.15)) { screen = .list }
                 }
                 .transition(.opacity)
@@ -190,9 +190,21 @@ struct ProcessListView: View {
 
     private var footer: some View {
         HStack(spacing: 10) {
-            Text("\(state.pins.count) pinned")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+            if case .available(let release) = state.updateState {
+                Button {
+                    NSWorkspace.shared.open(release.htmlURL)
+                } label: {
+                    Label("Update \(release.version)", systemImage: "arrow.down.circle.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .help("A new version is available — click to download")
+            } else {
+                Text("\(state.pins.count) pinned")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
             Spacer()
             Button {
                 withAnimation(.easeInOut(duration: 0.15)) { screen = .settings }
@@ -297,7 +309,15 @@ struct ProjectSection: View {
     }
 
     private var projectMenu: some View {
-        Menu {
+        let pc = state.projectPausedCount(project)
+        return Menu {
+            if pc.running - pc.paused > 0 {
+                Button("Pause All") { state.setProjectPaused(project, paused: true) }
+            }
+            if pc.paused > 0 {
+                Button("Resume All") { state.setProjectPaused(project, paused: false) }
+            }
+            if pc.running > 0 { Divider() }
             if state.projectHasTmuxPanes(project) {
                 Button("Kill tmux Session “\(project)”", role: .destructive) {
                     state.killTmuxSession(project)
@@ -332,10 +352,13 @@ struct ProcessRow: View {
 
     private var status: ProcessStatus? { state.statuses[pin.id] }
     private var running: Bool { status?.isRunning ?? false }
+    private var paused: Bool { status?.isPaused ?? false }
 
     var body: some View {
         HStack(spacing: 10) {
-            StatusDot(running: running)
+            Circle()
+                .fill(paused ? Color.yellow : (running ? Color.green : Color.secondary.opacity(0.5)))
+                .frame(width: 8, height: 8)
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
@@ -365,6 +388,7 @@ struct ProcessRow: View {
 
     private var subtitle: String {
         guard running, let s = status else { return "not running · PID \(pin.pid)" }
+        if s.isPaused { return "paused · PID \(pin.pid)" }
         var parts = ["up \(Format.uptime(s.uptimeSeconds ?? 0))"]
         if let c = s.cpuPercent { parts.append("\(Format.cpu(c)) CPU") }
         if let m = s.memoryBytes { parts.append(Format.memory(m)) }
@@ -391,6 +415,12 @@ struct ProcessRow: View {
                 .opacity(running ? 1 : 0.35)
 
                 Menu {
+                    if paused {
+                        Button("Resume") { state.setPaused(pin.id, paused: false) }
+                    } else {
+                        Button("Pause") { state.setPaused(pin.id, paused: true) }
+                            .disabled(!running)
+                    }
                     Button("Force Kill (SIGKILL)") { state.kill(pin.id, force: true) }
                         .disabled(!running)
                     Button("Edit Project / Role…") {

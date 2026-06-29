@@ -14,6 +14,11 @@ final class AppState: ObservableObject {
     /// Detected AI agents and their process trees (only scanned when enabled).
     @Published private(set) var agents: [Agents.Agent] = []
 
+    // Update checking.
+    enum UpdateState: Equatable { case unknown, checking, upToDate, available(Updater.Release) }
+    @Published var updateState: UpdateState = .unknown
+    private var didAutoCheckUpdates = false
+
     private var timer: Timer?
     private var scanAgentsEnabled = false
     private let work = DispatchQueue(label: "com.procpin.refresh", qos: .userInitiated)
@@ -75,6 +80,23 @@ final class AppState: ObservableObject {
             Task { @MainActor in self?.refresh() }
         }
         refresh()
+        // Check for updates once per launch when the panel is first opened.
+        if !didAutoCheckUpdates {
+            didAutoCheckUpdates = true
+            checkForUpdates()
+        }
+    }
+
+    /// Queries GitHub Releases for a newer version (non-blocking).
+    func checkForUpdates() {
+        updateState = .checking
+        Task { @MainActor in
+            if let release = await Updater.checkForUpdate() {
+                self.updateState = .available(release)
+            } else {
+                self.updateState = .upToDate
+            }
+        }
     }
 
     func stopAutoRefresh() {
@@ -266,6 +288,34 @@ final class AppState: ObservableObject {
         ProcessManager.kill(pid: pin.pid, force: force)
         // Reflect change quickly.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.refresh() }
+    }
+
+    /// Suspend (pause) or resume a single pinned process.
+    func setPaused(_ id: UUID, paused: Bool) {
+        guard let pin = pins.first(where: { $0.id == id }) else { return }
+        if paused { ProcessManager.suspend(pid: pin.pid) }
+        else { ProcessManager.resume(pid: pin.pid) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in self?.refresh() }
+    }
+
+    /// Suspend (pause) or resume every process in a project.
+    func setProjectPaused(_ project: String, paused: Bool) {
+        for pin in pins where pin.project == project {
+            if paused { ProcessManager.suspend(pid: pin.pid) }
+            else { ProcessManager.resume(pid: pin.pid) }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in self?.refresh() }
+    }
+
+    /// Number of running/paused processes in a project (for menu state).
+    func projectPausedCount(_ project: String) -> (paused: Int, running: Int) {
+        var paused = 0, running = 0
+        for pin in pins where pin.project == project {
+            guard let s = statuses[pin.id], s.isRunning else { continue }
+            running += 1
+            if s.isPaused { paused += 1 }
+        }
+        return (paused, running)
     }
 
     func restart(_ id: UUID) {
