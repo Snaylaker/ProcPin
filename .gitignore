@@ -1,0 +1,8 @@
+.DS_Store
+.build/
+build/
+*.app
+*.xcodeproj
+*.swiftpm
+DerivedData/
+.netrc
