@@ -12,7 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         // Status bar item shows the app's colorful icon (not a template glyph).
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
-            button.image = Self.menuBarIcon()
+            button.image = MenuBarIcon.image()
             button.action = #selector(togglePopover(_:))
             button.target = self
         }
@@ -23,25 +23,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popover.animates = true
         popover.delegate = self
         popover.contentViewController = NSHostingController(rootView: RootView(state: state))
-    }
-
-    /// The colorful app icon, sized for the menu bar. Falls back to a symbol
-    /// when run outside the .app bundle (e.g. `swift run`).
-    private static func menuBarIcon() -> NSImage {
-        if let path = Bundle.main.path(forResource: "AppIcon", ofType: "icns"),
-           let img = NSImage(contentsOfFile: path) {
-            let menuIcon = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { rect in
-                img.draw(in: rect)
-                return true
-            }
-            menuIcon.isTemplate = false   // keep full color
-            return menuIcon
-        }
-        let fallback = NSImage(systemSymbolName: "checklist", accessibilityDescription: "ProcPin")
-            ?? NSImage(systemSymbolName: "list.bullet", accessibilityDescription: "ProcPin")
-            ?? NSImage()
-        fallback.isTemplate = true
-        return fallback
     }
 
     @objc private func togglePopover(_ sender: Any?) {
