@@ -45,15 +45,50 @@ enum Tmux {
         }
     }
 
-    /// Resolves the tmux binary path using a login shell so Homebrew paths
-    /// (e.g. /opt/homebrew/bin) are found even when launched from Finder.
-    private static func tmuxPath() -> String? {
-        guard let out = run("/bin/sh", ["-lc", "command -v tmux"]),
-              case let path = out.trimmingCharacters(in: .whitespacesAndNewlines),
-              !path.isEmpty else {
-            return nil
+    /// Cached resolved tmux path (resolved once per launch).
+    nonisolated(unsafe) private static var cachedPath: String?
+    nonisolated(unsafe) private static var didResolve = false
+
+    /// Resolves the tmux binary path robustly: known install locations first,
+    /// then the user's login shell (so Homebrew/Nix/MacPorts PATHs are found
+    /// even when launched from Finder, where the minimal PATH lacks them).
+    static func tmuxPath() -> String? {
+        if didResolve { return cachedPath }
+        didResolve = true
+        cachedPath = resolveTmuxPath()
+        return cachedPath
+    }
+
+    private static func resolveTmuxPath() -> String? {
+        let fm = FileManager.default
+        let home = NSHomeDirectory()
+        // 1. Common absolute locations (fast, no shell).
+        let candidates = [
+            "/opt/homebrew/bin/tmux",          // Apple Silicon Homebrew
+            "/usr/local/bin/tmux",             // Intel Homebrew
+            "/usr/bin/tmux",                   // system
+            "/opt/local/bin/tmux",             // MacPorts
+            "\(home)/.nix-profile/bin/tmux",   // Nix (user)
+            "/run/current-system/sw/bin/tmux", // Nix (system)
+            "/sw/bin/tmux"                     // Fink
+        ]
+        for c in candidates where fm.isExecutableFile(atPath: c) { return c }
+
+        // 2. Ask the user's login shell (sources .zprofile/.zshrc/config.fish,
+        //    where Homebrew etc. usually add themselves to PATH).
+        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        let attempts: [[String]] = [
+            [shell, "-l", "-c", "command -v tmux"],
+            ["/bin/sh", "-lc", "command -v tmux"]
+        ]
+        for args in attempts {
+            guard let exe = args.first,
+                  let out = run(exe, Array(args.dropFirst())) else { continue }
+            let path = out.split(separator: "\n").first.map(String.init)?
+                .trimmingCharacters(in: .whitespaces) ?? ""
+            if !path.isEmpty, fm.isExecutableFile(atPath: path) { return path }
         }
-        return path
+        return nil
     }
 
     /// Returns true if tmux is installed.

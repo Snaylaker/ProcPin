@@ -35,6 +35,7 @@ struct SettingsView: View {
                             }
                         }
                     }
+                    diagnosticsSection
                 }
                 .padding(14)
             }
@@ -115,6 +116,25 @@ struct SettingsView: View {
         Button("Check for Updates") { state.checkForUpdates() }
             .buttonStyle(.bordered)
             .controlSize(.small)
+    }
+
+    // MARK: Diagnostics
+
+    private var diagnosticsSection: some View {
+        section(title: "Diagnostics", subtitle: "") {
+            HStack(spacing: 6) {
+                let path = Tmux.tmuxPath()
+                Image(systemName: path != nil ? "checkmark.circle.fill" : "xmark.circle.fill")
+                    .foregroundStyle(path != nil ? .green : .red)
+                    .font(.system(size: 11))
+                Text(path != nil ? "tmux: \(path!)" : "tmux: not found on PATH")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+        }
     }
 
     private var header: some View {
