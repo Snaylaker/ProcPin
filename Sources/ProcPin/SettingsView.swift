@@ -6,6 +6,7 @@ struct SettingsView: View {
     let onClose: () -> Void
 
     @AppStorage(Terminals.settingsKey) private var terminalID: String = "auto"
+    @AppStorage("ProcPin.showDock") private var showDock: Bool = true
 
     var body: some View {
         VStack(spacing: 0) {
@@ -14,6 +15,16 @@ struct SettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     updatesSection
+                    section(title: "General", subtitle: "") {
+                        Toggle(isOn: $showDock) {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("Show Dock icon").font(.system(size: 12.5))
+                                Text("Off = menu bar only").font(.system(size: 10)).foregroundStyle(.secondary)
+                            }
+                        }
+                        .toggleStyle(.switch)
+                        .onChange(of: showDock) { AppDelegate.setDockVisible($0) }
+                    }
                     section(title: "Terminal", subtitle: "Used when jumping to a tmux pane. Auto-detect figures out the hosting terminal from the pane's tty; pick a specific app if that doesn't work.") {
                         VStack(spacing: 2) {
                             ForEach(Terminals.all) { term in
@@ -86,10 +97,12 @@ struct SettingsView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title).font(.system(size: 13, weight: .bold))
-            Text(subtitle)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            if !subtitle.isEmpty {
+                Text(subtitle)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             content()
                 .padding(.top, 2)
         }
