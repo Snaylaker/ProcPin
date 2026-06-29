@@ -85,8 +85,13 @@ enum ProcessManager {
     /// Computes status for many pins using a SINGLE `ps` call (instead of one
     /// per pin). This is the hot path used by the periodic refresh.
     static func statuses(for pins: [PinnedProcess]) -> [UUID: ProcessStatus] {
+        statuses(for: pins, rows: listAllDetailed())
+    }
+
+    /// Same as `statuses(for:)` but reuses an existing process snapshot (so the
+    /// caller can share one `ps` call with the tmux mirror).
+    static func statuses(for pins: [PinnedProcess], rows: [ProcRow]) -> [UUID: ProcessStatus] {
         guard !pins.isEmpty else { return [:] }
-        let rows = listAllDetailed()
         var byPID: [Int32: ProcRow] = [:]
         byPID.reserveCapacity(rows.count)
         var childrenByPPID: [Int32: [Int32]] = [:]

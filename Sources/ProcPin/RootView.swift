@@ -8,7 +8,6 @@ struct RootView: View {
 
     enum Screen: Equatable {
         case list
-        case assign(editing: UUID?)
         case settings
     }
     @State private var screen: Screen = .list
@@ -19,11 +18,6 @@ struct RootView: View {
             case .list:
                 ProcessListView(state: state, screen: $screen)
                     .transition(.opacity)
-            case .assign(let editing):
-                AssignView(state: state, editingPinID: editing) {
-                    withAnimation(.easeInOut(duration: 0.15)) { screen = .list }
-                }
-                .transition(.opacity)
             case .settings:
                 SettingsView(state: state) {
                     withAnimation(.easeInOut(duration: 0.15)) { screen = .list }
@@ -75,9 +69,9 @@ struct ProcessListView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            Image(systemName: "pin.circle.fill")
+            Image(systemName: "rectangle.split.3x1.fill")
                 .foregroundStyle(.tint)
-                .font(.system(size: 19))
+                .font(.system(size: 17))
             VStack(alignment: .leading, spacing: 1) {
                 Text("ProcPin")
                     .font(.system(size: 16, weight: .bold))
@@ -86,14 +80,6 @@ struct ProcessListView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Button {
-                withAnimation(.easeInOut(duration: 0.15)) { screen = .assign(editing: nil) }
-            } label: {
-                Label("Add", systemImage: "plus")
-                    .font(.system(size: 12, weight: .semibold))
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
         }
         .padding(.horizontal, hPad)
         .padding(.top, 14)
@@ -103,7 +89,7 @@ struct ProcessListView: View {
     private var summaryText: String {
         let running = state.pins.filter { state.statuses[$0.id]?.isRunning ?? false }.count
         let totalCPU = state.pins.reduce(0.0) { $0 + (state.statuses[$1.id]?.cpuPercent ?? 0) }
-        if state.pins.isEmpty { return "no processes pinned" }
+        if state.pins.isEmpty { return "live tmux sessions" }
         return "\(running) of \(state.pins.count) running · \(Format.cpu(totalCPU)) CPU"
     }
 
@@ -126,8 +112,13 @@ struct ProcessListView: View {
     private var content: some View {
         let groups = state.groupedPins(filter: "")
         if state.pins.isEmpty {
-            emptyState(icon: "rectangle.split.3x1", title: "No tmux processes yet",
-                       subtitle: "Click Add to detect your tmux sessions and track their panes.")
+            if Tmux.tmuxPath() == nil {
+                emptyState(icon: "exclamationmark.triangle", title: "tmux not found",
+                           subtitle: "ProcPin shows your live tmux sessions. Install tmux (e.g. brew install tmux), then reopen. See Settings → Diagnostics.")
+            } else {
+                emptyState(icon: "rectangle.split.3x1", title: "No tmux sessions running",
+                           subtitle: "Start a tmux session and its panes will appear here automatically.")
+            }
         } else {
             ScrollView {
                 VStack(spacing: 0) {
@@ -302,11 +293,8 @@ struct ProjectSection: View {
                     state.killTmuxSession(project)
                 }
             }
-            Button("Kill All & Remove", role: .destructive) {
+            Button("Close All Panes", role: .destructive) {
                 state.killProjectAndRemove(project)
-            }
-            Button("Unpin All (keep running)") {
-                state.unpinProject(project)
             }
         } label: {
             Image(systemName: "ellipsis")
@@ -467,14 +455,8 @@ struct ProcessRow: View {
                     }
                     Button("Force Kill (SIGKILL)") { state.kill(pin.id, force: true) }
                         .disabled(!running)
-                    Button("Edit Project / Role…") {
-                        withAnimation(.easeInOut(duration: 0.15)) {
-                            screen = .assign(editing: pin.id)
-                        }
-                    }
                     Divider()
                     Button(removeLabel, role: .destructive) { state.killAndRemove(pin.id) }
-                    Button("Unpin (keep running)") { state.unpin(pin.id) }
                 } label: {
                     Image(systemName: "ellipsis")
                         .font(.system(size: 12, weight: .semibold))

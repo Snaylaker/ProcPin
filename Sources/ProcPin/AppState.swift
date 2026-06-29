@@ -23,7 +23,7 @@ final class AppState: ObservableObject {
     private let work = DispatchQueue(label: "com.procpin.refresh", qos: .userInitiated)
 
     init() {
-        pins = Store.shared.load()
+        // The list is mirrored live from tmux; nothing is persisted.
         refresh()
     }
 
@@ -120,83 +120,59 @@ final class AppState: ObservableObject {
         timer = nil
     }
 
-    /// Recompute statuses off the main thread (single `ps` call for all pins).
+    /// Rebuilds the list directly from live tmux panes (no manual pinning), then
+    /// computes status — sharing a single `ps` snapshot between the two.
     func refresh() {
-        let snapshot = pins
+        let existing = pins
         work.async {
-            // Keep tmux-origin pins pointing at whatever currently runs in their
-            // pane (the foreground process / pid can change over time).
-            let updates = self.computeTmuxSync(snapshot)
-            var synced = snapshot
-            if !updates.isEmpty {
-                for i in synced.indices {
-                    if let u = updates[synced[i].id] {
-                        synced[i].pid = u.pid
-                        synced[i].observedStartEpoch = u.epoch
-                        synced[i].name = u.name
-                        synced[i].command = u.command
-                        synced[i].workingDirectory = u.cwd
-                    }
-                }
-            }
-            let newStatuses = ProcessManager.statuses(for: synced)
+            let rows = ProcessManager.listAllDetailed()
+            let mirrored = Self.mirrorFromTmux(existing: existing, rows: rows)
+            let newStatuses = ProcessManager.statuses(for: mirrored, rows: rows)
             Task { @MainActor in
-                self.applyTmuxUpdates(updates)
+                self.pins = mirrored
                 self.statuses = newStatuses
             }
         }
         if scanAgentsEnabled { scanAgents() }
     }
 
-    private struct TmuxPinUpdate {
-        let pid: Int32
-        let epoch: Double?
-        let name: String
-        let command: String
-        let cwd: String?
-    }
-
-    /// For each tmux-origin pin, re-resolve its live pane (pid/command/cwd).
-    private func computeTmuxSync(_ snapshot: [PinnedProcess]) -> [UUID: TmuxPinUpdate] {
-        let tmuxPins = snapshot.filter { ($0.tmuxPaneId?.isEmpty == false) }
-        guard !tmuxPins.isEmpty else { return [:] }
+    /// Builds the pin list from every live tmux pane. Reuses each existing pin's
+    /// UUID (keyed by pane id) so SwiftUI identity and fold state stay stable.
+    private static func mirrorFromTmux(existing: [PinnedProcess], rows: [ProcessManager.ProcRow]) -> [PinnedProcess] {
         let panes = Tmux.rawPanesByID()
-        guard !panes.isEmpty else { return [:] }
+        guard !panes.isEmpty else { return [] }
 
-        var updates: [UUID: TmuxPinUpdate] = [:]
-        for pin in tmuxPins {
-            guard let paneId = pin.tmuxPaneId, let pane = panes[paneId] else { continue }
+        var byPID: [Int32: ProcessManager.ProcRow] = [:]
+        for r in rows { byPID[r.pid] = r }
+        var idByPane: [String: UUID] = [:]
+        for p in existing { if let pane = p.tmuxPaneId { idByPane[pane] = p.id } }
+
+        var result: [PinnedProcess] = []
+        for (paneId, pane) in panes {
             let fg = Tmux.resolveForegroundPID(tty: pane.tty, fallback: pane.panePID)
-            let epoch = ProcessManager.startDate(forPID: fg)?.timeIntervalSince1970
-            let command = ProcessManager.commandLine(forPID: fg) ?? pane.currentCommand
-            updates[pin.id] = TmuxPinUpdate(
+            let row = byPID[fg]
+            let role = (!pane.windowName.isEmpty && pane.windowName != pane.currentCommand)
+                ? pane.windowName : pane.currentCommand
+            result.append(PinnedProcess(
+                id: idByPane[paneId] ?? UUID(),
                 pid: fg,
-                epoch: epoch,
                 name: pane.currentCommand,
-                command: command,
-                cwd: pane.currentPath.isEmpty ? pin.workingDirectory : pane.currentPath
-            )
+                command: row?.command ?? pane.currentCommand,
+                workingDirectory: pane.currentPath.isEmpty ? nil : pane.currentPath,
+                observedStartEpoch: row?.startDate.timeIntervalSince1970,
+                project: pane.session,
+                role: role,
+                tmuxPaneId: paneId
+            ))
         }
-        return updates
-    }
-
-    /// Applies tmux updates to the stored pins, persisting only on real change.
-    private func applyTmuxUpdates(_ updates: [UUID: TmuxPinUpdate]) {
-        guard !updates.isEmpty else { return }
-        var changed = false
-        for i in pins.indices {
-            guard let u = updates[pins[i].id] else { continue }
-            if pins[i].pid != u.pid || pins[i].name != u.name
-                || pins[i].command != u.command || pins[i].workingDirectory != u.cwd {
-                pins[i].pid = u.pid
-                pins[i].observedStartEpoch = u.epoch
-                pins[i].name = u.name
-                pins[i].command = u.command
-                pins[i].workingDirectory = u.cwd
-                changed = true
+        // Sort by session, then pane number for stable ordering.
+        func paneNum(_ id: String?) -> Int { Int(id?.replacingOccurrences(of: "%", with: "") ?? "") ?? 0 }
+        return result.sorted { a, b in
+            if a.project != b.project {
+                return a.project.localizedCaseInsensitiveCompare(b.project) == .orderedAscending
             }
+            return paneNum(a.tmuxPaneId) < paneNum(b.tmuxPaneId)
         }
-        if changed { persist() }
     }
 
     /// Enable/disable agent tree scanning (driven by the Agents tab).
@@ -213,65 +189,36 @@ final class AppState: ObservableObject {
         }
     }
 
-    // MARK: - Mutations
+    // MARK: - Process actions
 
-    func addPin(_ pin: PinnedProcess) {
-        pins.append(pin)
-        persist()
-        refresh()
-    }
-
-    func unpin(_ id: UUID) {
-        pins.removeAll { $0.id == id }
-        statuses[id] = nil
-        persist()
-    }
-
-    /// Kills the process, closes its tmux pane (if it came from one), and
-    /// removes the pin from the list. Returns true if a tmux pane was closed.
-    @discardableResult
-    func killAndRemove(_ id: UUID) -> Bool {
-        guard let pin = pins.first(where: { $0.id == id }) else { return false }
-        var closedPane = false
+    /// Closes the tmux pane (which stops whatever runs inside it). The list
+    /// updates on the next refresh.
+    func killAndRemove(_ id: UUID) {
+        guard let pin = pins.first(where: { $0.id == id }) else { return }
         if let paneId = pin.tmuxPaneId, !paneId.isEmpty {
-            // Closing the pane also kills the process running inside it.
-            closedPane = Tmux.killPane(paneId)
-        }
-        if !closedPane {
-            // No tmux pane (or tmux unavailable): kill the process directly.
+            Tmux.killPane(paneId)
+        } else {
             ProcessManager.kill(pid: pin.pid, force: true)
         }
-        unpin(id)
-        return closedPane
+        pins.removeAll { $0.id == id }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.refresh() }
     }
 
     // MARK: - Project-level actions
 
-    /// Cheap, synchronous check (no tmux call): does the project contain pins
-    /// that originated from tmux panes?
+    /// Cheap, synchronous check: does the project contain tmux panes?
     func projectHasTmuxPanes(_ project: String) -> Bool {
         !project.isEmpty && pins.contains { $0.project == project && ($0.tmuxPaneId?.isEmpty == false) }
     }
 
-    /// True if the project corresponds to a live tmux session (its pins came
-    /// from tmux and a session with that name still exists).
-    func projectIsTmuxSession(_ project: String) -> Bool {
-        guard !project.isEmpty,
-              pins.contains(where: { $0.project == project && ($0.tmuxPaneId?.isEmpty == false) })
-        else { return false }
-        return Tmux.sessionExists(project)
-    }
-
-    /// Kills the whole tmux session for a project and removes all its pins.
+    /// Kills the whole tmux session for a project.
     func killTmuxSession(_ project: String) {
         Tmux.killSession(project)
         pins.removeAll { $0.project == project }
-        persist()
-        refresh()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.refresh() }
     }
 
-    /// Force-kills every process in a project (closing tmux panes where known)
-    /// and removes all its pins.
+    /// Closes every pane in a project (which stops its processes).
     func killProjectAndRemove(_ project: String) {
         for pin in pins where pin.project == project {
             if let paneId = pin.tmuxPaneId, !paneId.isEmpty {
@@ -281,48 +228,7 @@ final class AppState: ObservableObject {
             }
         }
         pins.removeAll { $0.project == project }
-        persist()
-        refresh()
-    }
-
-    /// Removes all of a project's pins without touching the processes.
-    func unpinProject(_ project: String) {
-        pins.removeAll { $0.project == project }
-        persist()
-    }
-
-    /// Pins a set of tmux panes in one go. Each pane's session becomes the
-    /// project and its window/command becomes the role. Returns count added.
-    @discardableResult
-    func pinTmuxPanes(_ panes: [Tmux.Pane]) -> Int {
-        let existingPIDs = Set(pins.map { $0.pid })
-        var added = 0
-        for pane in panes {
-            if existingPIDs.contains(pane.trackPID) { continue }
-            let command = ProcessManager.commandLine(forPID: pane.trackPID) ?? pane.currentCommand
-            let start = ProcessManager.startDate(forPID: pane.trackPID)?.timeIntervalSince1970
-            let pin = PinnedProcess(
-                pid: pane.trackPID,
-                name: pane.name,
-                command: command,
-                workingDirectory: pane.currentPath.isEmpty ? nil : pane.currentPath,
-                observedStartEpoch: start,
-                project: pane.session,
-                role: pane.suggestedRole,
-                tmuxPaneId: pane.paneId
-            )
-            pins.append(pin)
-            added += 1
-        }
-        if added > 0 { persist(); refresh() }
-        return added
-    }
-
-    func updatePin(_ id: UUID, project: String, role: String) {
-        guard let idx = pins.firstIndex(where: { $0.id == id }) else { return }
-        pins[idx].project = project
-        pins[idx].role = role
-        persist()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.refresh() }
     }
 
     func kill(_ id: UUID, force: Bool) {
@@ -365,22 +271,11 @@ final class AppState: ObservableObject {
     }
 
     func restart(_ id: UUID) {
-        guard let idx = pins.firstIndex(where: { $0.id == id }) else { return }
-        let pin = pins[idx]
-        if let paneId = pin.tmuxPaneId, !paneId.isEmpty {
-            // Restart inside the tmux pane (Ctrl-C + re-run last command).
-            Tmux.restartPane(paneId)
-            // Live-sync will pick up the new pid on the next refresh.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in self?.refresh() }
-            return
-        }
-        if let newPID = ProcessManager.restart(pin) {
-            pins[idx].pid = newPID
-            usleep(200_000)
-            pins[idx].observedStartEpoch = ProcessManager.startDate(forPID: newPID)?.timeIntervalSince1970
-            persist()
-        }
-        refresh()
+        guard let pin = pins.first(where: { $0.id == id }),
+              let paneId = pin.tmuxPaneId, !paneId.isEmpty else { return }
+        // Restart inside the tmux pane (Ctrl-C + re-run last command).
+        Tmux.restartPane(paneId)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in self?.refresh() }
     }
 
     /// Focuses the tmux pane a process runs in and raises its terminal window.
@@ -420,28 +315,6 @@ final class AppState: ObservableObject {
             self?.scanAgents()
             self?.refresh()
         }
-    }
-
-    /// Pin a process by raw pid (e.g. an MCP server from an agent tree).
-    func pinPID(_ pid: Int32, name: String, project: String, role: String) {
-        guard !pins.contains(where: { $0.pid == pid }) else { return }
-        let command = ProcessManager.commandLine(forPID: pid) ?? name
-        let start = ProcessManager.startDate(forPID: pid)?.timeIntervalSince1970
-        let pin = PinnedProcess(
-            pid: pid,
-            name: name,
-            command: command,
-            workingDirectory: nil,
-            observedStartEpoch: start,
-            project: project,
-            role: role
-        )
-        addPin(pin)
-    }
-
-
-    private func persist() {
-        Store.shared.save(pins)
     }
 }
 
