@@ -184,6 +184,52 @@ final class AppState: ObservableObject {
         return closedPane
     }
 
+    // MARK: - Project-level actions
+
+    /// Cheap, synchronous check (no tmux call): does the project contain pins
+    /// that originated from tmux panes?
+    func projectHasTmuxPanes(_ project: String) -> Bool {
+        !project.isEmpty && pins.contains { $0.project == project && ($0.tmuxPaneId?.isEmpty == false) }
+    }
+
+    /// True if the project corresponds to a live tmux session (its pins came
+    /// from tmux and a session with that name still exists).
+    func projectIsTmuxSession(_ project: String) -> Bool {
+        guard !project.isEmpty,
+              pins.contains(where: { $0.project == project && ($0.tmuxPaneId?.isEmpty == false) })
+        else { return false }
+        return Tmux.sessionExists(project)
+    }
+
+    /// Kills the whole tmux session for a project and removes all its pins.
+    func killTmuxSession(_ project: String) {
+        Tmux.killSession(project)
+        pins.removeAll { $0.project == project }
+        persist()
+        refresh()
+    }
+
+    /// Force-kills every process in a project (closing tmux panes where known)
+    /// and removes all its pins.
+    func killProjectAndRemove(_ project: String) {
+        for pin in pins where pin.project == project {
+            if let paneId = pin.tmuxPaneId, !paneId.isEmpty {
+                Tmux.killPane(paneId)
+            } else {
+                ProcessManager.kill(pid: pin.pid, force: true)
+            }
+        }
+        pins.removeAll { $0.project == project }
+        persist()
+        refresh()
+    }
+
+    /// Removes all of a project's pins without touching the processes.
+    func unpinProject(_ project: String) {
+        pins.removeAll { $0.project == project }
+        persist()
+    }
+
     /// Pins a set of tmux panes in one go. Each pane's session becomes the
     /// project and its window/command becomes the role. Returns count added.
     @discardableResult

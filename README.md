@@ -60,6 +60,18 @@ stops the process) and removes it from the list. For non-tmux processes it
 force-kills the process and removes the pin. **Unpin (keep running)** only drops
 it from ProcPin's list without touching the process.
 
+### Project / session teardown
+
+Each project card has a **⋯** menu:
+
+- **Kill tmux Session “…”** (only for projects that came from tmux) — runs
+  `tmux kill-session` to tear down the entire session (all its panes/processes)
+  and removes its pins.
+- **Kill All & Remove** — force-kills every process in the project (closing
+  tmux panes where known) and removes its pins.
+- **Unpin All (keep running)** — drops the project's pins without killing
+  anything.
+
 ## How tmux detection works
 
 `Tmux.detect()` runs `tmux list-panes -a` and, for each pane, resolves the

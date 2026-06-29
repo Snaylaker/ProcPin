@@ -67,6 +67,23 @@ enum Tmux {
         return runFull(tmux, ["kill-pane", "-t", paneId]).status == 0
     }
 
+    /// Kills an entire tmux session by name (closes all its windows/panes and
+    /// the processes inside them).
+    @discardableResult
+    static func killSession(_ name: String) -> Bool {
+        guard let tmux = tmuxPath(), !name.isEmpty else { return false }
+        return runFull(tmux, ["kill-session", "-t", name]).status == 0
+    }
+
+    /// Whether a tmux session with the given name currently exists.
+    static func sessionExists(_ name: String) -> Bool {
+        guard let tmux = tmuxPath(), !name.isEmpty else { return false }
+        // Exact-name match: list sessions and compare (has-session matches prefixes).
+        let r = runFull(tmux, ["list-sessions", "-F", "#{session_name}"])
+        guard r.status == 0 else { return false }
+        return r.stdout.split(separator: "\n").contains { $0 == Substring(name) }
+    }
+
     /// Lists all panes across all sessions, with the tracked process resolved.
     static func detect() -> Result<[Pane], DetectError> {
         guard let tmux = tmuxPath() else { return .failure(.notInstalled) }

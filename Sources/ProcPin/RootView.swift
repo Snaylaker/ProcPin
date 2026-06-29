@@ -241,6 +241,7 @@ struct ProjectSection: View {
                         .font(.system(size: 10, weight: .medium, design: .rounded))
                         .foregroundStyle(.secondary)
                 }
+                projectMenu
             }
             if cap.running > 0 {
                 HStack(spacing: 8) {
@@ -263,6 +264,30 @@ struct ProjectSection: View {
         case 40..<80: return .yellow
         default: return .red
         }
+    }
+
+    /// Per-project teardown actions.
+    private var projectMenu: some View {
+        Menu {
+            if state.projectHasTmuxPanes(project) {
+                Button("Kill tmux Session “\(project)”", role: .destructive) {
+                    state.killTmuxSession(project)
+                }
+            }
+            Button("Kill All & Remove", role: .destructive) {
+                state.killProjectAndRemove(project)
+            }
+            Button("Unpin All (keep running)") {
+                state.unpinProject(project)
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .frame(width: 22)
     }
 }
 
