@@ -141,8 +141,27 @@ enum ProcessManager {
         let rows = listAllDetailed()
         var byPID: [Int32: ProcRow] = [:]
         byPID.reserveCapacity(rows.count)
-        for r in rows { byPID[r.pid] = r }
+        var childrenByPPID: [Int32: [Int32]] = [:]
+        for r in rows {
+            byPID[r.pid] = r
+            childrenByPPID[r.ppid, default: []].append(r.pid)
+        }
         let portMap = listeningPorts()
+
+        // Ports can be held by a child/grandchild of the tracked process
+        // (e.g. `pnpm dev` -> node -> next-server). Gather ports for the whole
+        // subtree rooted at the pinned pid.
+        func subtreePorts(_ root: Int32) -> [Int] {
+            var seen = Set<Int32>()
+            var stack = [root]
+            var ports = Set<Int>()
+            while let p = stack.popLast() {
+                guard seen.insert(p).inserted else { continue }
+                if let ps = portMap[p] { ports.formUnion(ps) }
+                if let kids = childrenByPPID[p] { stack.append(contentsOf: kids) }
+            }
+            return ports.sorted()
+        }
 
         let now = Date()
         var result: [UUID: ProcessStatus] = [:]
@@ -164,7 +183,7 @@ enum ProcessManager {
                                            uptimeSeconds: now.timeIntervalSince(r.startDate),
                                            cpuPercent: r.cpuPercent, memoryBytes: r.memoryBytes,
                                            isPaused: r.isStopped,
-                                           ports: portMap[pin.pid] ?? [])
+                                           ports: subtreePorts(pin.pid))
         }
         return result
     }

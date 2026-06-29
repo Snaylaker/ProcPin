@@ -328,10 +328,10 @@ struct ProcessRow: View {
     private var paused: Bool { status?.isPaused ?? false }
     private var ports: [Int] { Array((status?.ports ?? []).prefix(3)) }
 
-    /// A clickable port chip that opens http://localhost:PORT in the browser.
+    /// A clickable port chip that opens the local URL in the browser.
     private func portChip(_ port: Int) -> some View {
         Button {
-            if let url = URL(string: "http://localhost:\(port)") {
+            if let url = Self.localURL(forPort: port) {
                 NSWorkspace.shared.open(url)
             }
         } label: {
@@ -345,7 +345,15 @@ struct ProcessRow: View {
             .foregroundStyle(.blue)
         }
         .buttonStyle(.plain)
-        .help("Open http://localhost:\(port)")
+        .help("Open \(Self.localURL(forPort: port)?.absoluteString ?? "")")
+    }
+
+    /// Builds a localhost URL, using https for common TLS ports.
+    static func localURL(forPort port: Int) -> URL? {
+        let isTLS = (port == 443 || port == 8443)
+        let scheme = isTLS ? "https" : "http"
+        let suffix = (port == 443 || port == 80) ? "" : ":\(port)"
+        return URL(string: "\(scheme)://localhost\(suffix)")
     }
 
     var body: some View {
